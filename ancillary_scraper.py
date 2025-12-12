@@ -26,11 +26,41 @@ def fetch_data():
         print(f"Error fetching data: {e}")
         return None
 
+def deep_flatten(dictionary, parent_key='', separator='_'):
+    """Recursively flattens a nested dictionary and list structure."""
+    items = []
+    
+    # Iterate over all items in the dictionary
+    for key, value in dictionary.items():
+        new_key = parent_key + separator + key if parent_key else key
+        # Clean key for column name (e.g., remove spaces/colons)
+        new_key_clean = new_key.replace(" ", "_").replace(":", "_").replace(".", "_").upper()
+        
+        if isinstance(value, dict):
+            # Recurse into nested dictionary
+            items.extend(deep_flatten(value, new_key_clean, separator=separator).items())
+        elif isinstance(value, list):
+            # Recurse into lists
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    # Use a unique identifier for list items (like the AS product name)
+                    item_id = item.get('type') or item.get('service') or item.get('name') or f"INDEX{i}"
+                    item_prefix = f"{new_key_clean}_{item_id}".upper().replace(" ", "_")
+                    items.extend(deep_flatten(item, item_prefix, separator=separator).items())
+                else:
+                    # Simple lists (treat as single values appended by index)
+                    items.append((f"{new_key_clean}_{i}", item))
+        else:
+            # Found a scalar value (int, float, string, bool)
+            items.append((new_key_clean, value))
+            
+    return dict(items)
+
+
 def flatten_data(json_data):
     """
-    Flattens the nested ERCOT JSON structure into a single dictionary (row) 
-    by aggressively iterating through all key-value pairs, including nested lists 
-    and dictionaries, to capture all 60+ fields.
+    Sets up the initial record and calls the deep_flatten function 
+    on the main data payload.
     """
     if not json_data:
         return None
@@ -44,50 +74,12 @@ def flatten_data(json_data):
     if 'lastUpdate' in json_data:
         flat_record['ercot_last_update'] = json_data['lastUpdate']
 
-    # We only care about the inner 'data' block
+    # CRITICAL: We pass the entire 'data' payload to the deep flattener
     raw_data = json_data.get('data', {})
-
-    # Function to recursively process nested data
-    def process_data_block(data_block, prefix=""):
-        if not isinstance(data_block, dict):
-            return
-            
-        for key, value in data_block.items():
-            current_prefix = f"{prefix}_{key}" if prefix else key
-            current_prefix_clean = current_prefix.replace(" ", "_").replace(":", "_").upper()
-            
-            if isinstance(value, (int, float, str, bool)):
-                # Found a simple data point (e.g., PRC value)
-                flat_record[current_prefix_clean] = value
-                
-            elif isinstance(value, dict):
-                # Found a nested dictionary (e.g., an 'aggregation' block)
-                process_data_block(value, current_prefix)
-                
-            elif isinstance(value, list) and all(isinstance(item, dict) for item in value):
-                # Found a list of dictionaries (These are the AS product rows)
-                
-                # Iterate through each AS product row in the list
-                for i, row in enumerate(value):
-                    
-                    # Try to find an identifier for the row (e.g., REGUP, RRS)
-                    row_id = row.get('type') or row.get('service') or row.get('name') or f"ITEM_{i}"
-                    row_id_clean = row_id.replace(" ", "_").replace(":", "_").upper()
-                    
-                    # Use the row's ID as the next prefix
-                    for k, v in row.items():
-                        # Skip keys used for identification
-                        if k not in ['type', 'service', 'name']: 
-                            col_name = f"{row_id_clean}_{k}".replace(" ", "_").upper()
-                            flat_record[col_name] = v
-
-    process_data_block(raw_data)
-
-    # CRITICAL DEBUG CHECK
-    # We expect more than just the two timestamp fields
-    if len(flat_record) <= 2:
-        print("Warning: Only timestamps were collected. The core data payload might be deeply nested or structured unexpectedly.")
     
+    # Extend the flat_record with all the extracted data
+    flat_record.update(deep_flatten(raw_data))
+
     return flat_record
 
 def save_to_csv(record):
@@ -118,18 +110,20 @@ def main():
         print("Data fetched successfully. Flattening...")
         flat_record = flatten_data(json_data)
         
+        # We expect more than 2 fields (scrape_timestamp_utc and ercot_last_update)
         if flat_record and len(flat_record) > 2:
             print(f"Successfully captured {len(flat_record)} fields.")
             print("Saving to CSV...")
             save_to_csv(flat_record)
             print("Done.")
         else:
-            print("Failed to extract data fields. Check API response structure.")
-            exit(1)
+            print(f"Failed to extract meaningful data fields. Only {len(flat_record)} fields found.")
+            # If data extraction failed, we exit with error code 1 so the commit step is skipped.
+            exit(1) 
     else:
         print("Failed to retrieve data.")
         exit(1)
 
 if __name__ == "__main__":
-    # Ensure all necessary firebase imports are available
     main()
+
