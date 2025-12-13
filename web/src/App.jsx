@@ -4,8 +4,8 @@ import { Upload, Calendar, Search, Filter, Activity, Zap, Clock, ChevronDown, Ch
 
 // --- CONFIGURATION ---
 // IMPORTANT: REPLACE THESE WITH YOUR GITHUB USERNAME AND REPO NAME
-const GITHUB_USERNAME = "YOUR_USERNAME_HERE"; 
-const REPO_NAME = "YOUR_REPO_NAME_HERE";
+const GITHUB_USERNAME = "adamrjordan"; 
+const REPO_NAME = "ERCOTASMONITOR";
 const BRANCH_NAME = "main";
 const CSV_FILENAME = "ercot_ancillary_data.csv";
 
