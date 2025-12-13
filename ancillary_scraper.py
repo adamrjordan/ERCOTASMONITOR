@@ -32,24 +32,39 @@ def deep_flatten(dictionary, parent_key='', separator='_'):
     
     # Iterate over all items in the dictionary
     for key, value in dictionary.items():
+        # Sanitize the key for the column name
         new_key = parent_key + separator + key if parent_key else key
-        # Clean key for column name (e.g., remove spaces/colons)
-        new_key_clean = new_key.replace(" ", "_").replace(":", "_").replace(".", "_").upper()
+        new_key_clean = new_key.replace(" ", "_").replace(":", "_").replace(".", "_").replace("-", "_").upper()
         
         if isinstance(value, dict):
             # Recurse into nested dictionary
             items.extend(deep_flatten(value, new_key_clean, separator=separator).items())
+        
         elif isinstance(value, list):
-            # Recurse into lists
-            for i, item in enumerate(value):
-                if isinstance(item, dict):
-                    # Use a unique identifier for list items (like the AS product name)
-                    item_id = item.get('type') or item.get('service') or item.get('name') or f"INDEX{i}"
+            # CRITICAL FIX: Check for list of [key, value] pairs (e.g., [['ecrsCapNclr', 146], ['ecrsCapClr', 12]])
+            is_key_value_list = all(isinstance(item, list) and len(item) == 2 and isinstance(item[0], str) for item in value)
+
+            if is_key_value_list:
+                # Use the field name (item[0]) as the final key part
+                for item_list in value:
+                    field_name = item_list[0].replace(" ", "_").replace("-", "_").upper()
+                    # Final key looks like: DATA_ASPRODUCTS_ECRSCAPNCLR
+                    final_key = f"{new_key_clean}_{field_name}"
+                    items.append((final_key, item_list[1]))
+            
+            # Standard: Check for list of dictionaries (like AS product rows)
+            elif all(isinstance(item, dict) for item in value):
+                # Iterate through each item, trying to find a unique identifier
+                for i, row in enumerate(value):
+                    item_id = row.get('type') or row.get('service') or row.get('name') or row.get('label') or f"INDEX{i}"
                     item_prefix = f"{new_key_clean}_{item_id}".upper().replace(" ", "_")
-                    items.extend(deep_flatten(item, item_prefix, separator=separator).items())
-                else:
-                    # Simple lists (treat as single values appended by index)
-                    items.append((f"{new_key_clean}_{i}", item))
+                    items.extend(deep_flatten(row, item_prefix, separator=separator).items())
+            
+            # Fallback for simple lists
+            else:
+                 for i, item in enumerate(value):
+                    items.append((f"{new_key_clean}_INDEX_{i}", item))
+        
         else:
             # Found a scalar value (int, float, string, bool)
             items.append((new_key_clean, value))
@@ -126,4 +141,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
