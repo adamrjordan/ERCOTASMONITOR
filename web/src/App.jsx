@@ -11,30 +11,9 @@ const CSV_FILENAME = "ercot_ancillary_data.csv";
 const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
 // --- ALIASES ---
-// Explicit mappings for the most important fields
 const COLUMN_ALIASES = {
-  // System
   "DATA_SYSTEM_PRC": "System PRC",
   "DATA_SYSTEM_SYSTEMLAMBDA": "System Lambda",
-  
-  // RRS (Responsive Reserve)
-  "DATA_RESPONSIVERESERVECAPABILITYGROUP_RRSCAPGEN": "RRS Cap (Gen)",
-  "DATA_RESPONSIVERESERVECAPABILITYGROUP_RRSCAPLOAD": "RRS Cap (Load)",
-  "DATA_RESPONSIVERESERVECAPABILITYGROUP_RRSCAPNCLR": "RRS Cap (NCLR)",
-  "DATA_RESPONSIVERESERVECAPABILITYGROUP_RRSCAPESR": "RRS Cap (ESR)",
-  
-  // Reg (Regulation)
-  "DATA_REGULATIONSERVICECAPABILITYGROUP_REGUPCAP": "RegUp Cap",
-  "DATA_REGULATIONSERVICECAPABILITYGROUP_REGDOWNCAP": "RegDown Cap",
-  
-  // Non-Spin
-  "DATA_NONSPINRESERVECAPABILITYGROUP_NSRCAPGEN": "Non-Spin Cap (Gen)",
-  "DATA_NONSPINRESERVECAPABILITYGROUP_NSRCAPESR": "Non-Spin Cap (ESR)",
-  
-  // ECRS (Contingency)
-  "DATA_ERCOTCONTINGENCYRESERVECAPABILITYGROUP_ECRSCAPGEN": "ECRS Cap (Gen)",
-  "DATA_ERCOTCONTINGENCYRESERVECAPABILITYGROUP_ECRSCAPNCLR": "ECRS Cap (NCLR)",
-  "DATA_ERCOTCONTINGENCYRESERVECAPABILITYGROUP_ECRSCAPESR": "ECRS Cap (ESR)",
 };
 
 const COLORS = [
@@ -52,13 +31,13 @@ const simpleCSVParse = (csvText) => {
 
     for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',');
-        // Skip malformed rows
+        // Allow leniency for trailing commas
         if (values.length < headers.length) continue;
 
         const row = {};
         headers.forEach((header, index) => {
             const val = values[index]?.trim();
-            // Handle quotes if present from bad scrapes
+            // Remove quotes if present
             row[header] = val ? val.replace(/['"]+/g, '') : val; 
         });
         parsedData.push(row);
@@ -80,14 +59,12 @@ const App = () => {
   const formatColumnName = (col) => {
     if (COLUMN_ALIASES[col]) return COLUMN_ALIASES[col];
     
-    // Heuristic: If it looks like garbage (has brackets or standard index), hide or clean
-    if (col.includes("GROUP_") || col.includes("INDEX_")) return col; // Let filter hide it later
-
     // Auto-Formatter for unknown columns
     let name = col
         .replace(/^DATA_/, '')
         .replace(/_GROUP/, '')
         .replace(/CAPABILITYGROUP/, '')
+        .replace(/AWARDSGROUP/, '') // Added this common group name
         .replace(/_/g, ' ');
         
     // Convert to Title Case
@@ -122,10 +99,9 @@ const App = () => {
         }
       }
       headers.forEach(h => {
-          // Robust number parsing: remove quotes, brackets if leftover from bad scrape
           let val = row[h];
           if (typeof val === 'string') {
-             if (val.startsWith('[')) return; // Skip list-strings (old bad data)
+             if (val.startsWith('[')) return; 
           }
           if(h !== 'scrape_timestamp_utc' && val !== undefined && val !== null && !isNaN(Number(val))) {
               newRow[h] = Number(val);
@@ -136,26 +112,35 @@ const App = () => {
 
     // Filter valid rows
     const validData = processed.filter(d => d.timestamp);
-    
-    // Sort by time
     validData.sort((a, b) => a.timestamp - b.timestamp);
 
     setRawData(validData);
     
-    // Filter columns: Hide System/Internal columns and "Gibberish" indices
+    // Filter columns: Hide System/Internal columns ONLY.
+    // REMOVED: !lower.includes('group_') because valid headers contain "GROUP"
     const metricCols = headers.filter(h => {
         const lower = h.toLowerCase();
         return !lower.includes('timestamp') && 
                !lower.includes('update') &&
                !lower.includes('type') &&
-               !lower.includes('index') &&
-               !lower.includes('group_'); // Hides the "GROUP_0" type garbage
+               !lower.includes('index');
     });
     
     setColumns(metricCols);
 
+    // Smart default selection
+    if (metricCols.length > 0) {
+        // If our currently selected column isn't in the new list, pick a new default
+        const currentIsValid = selectedColumns.every(sc => metricCols.includes(sc));
+        
+        if (!currentIsValid || selectedColumns.length === 0) {
+            // Try to find PRC, otherwise pick the first available column
+            const prcCol = metricCols.find(c => c.includes('PRC'));
+            setSelectedColumns([prcCol || metricCols[0]]);
+        }
+    }
+
     if (validData.length > 0) {
-       // Default to last 24h or full range
        const lastTime = validData[validData.length - 1].timestamp;
        const startTime = validData[0].timestamp;
        const oneDay = 24 * 60 * 60 * 1000;
@@ -173,7 +158,6 @@ const App = () => {
     setLoading(true);
     setError(null);
     try {
-      // Bypass cache with timestamp
       const response = await fetch(`${DATA_URL}?t=${Date.now()}`);
       if (!response.ok) {
         if (response.status === 404) throw new Error("CSV file not found. Did you delete it? Wait for the scraper to run (approx 5 mins).");
@@ -182,8 +166,6 @@ const App = () => {
       
       const csvText = await response.text();
       const results = simpleCSVParse(csvText);
-      
-      // Filter empty rows
       const cleanData = results.filter(row => Object.keys(row).length > 1);
 
       if (cleanData.length === 0) {
@@ -302,7 +284,7 @@ const App = () => {
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {columns
                     .filter(col => formatColumnName(col).toLowerCase().includes(filterText.toLowerCase()))
-                    .sort() // Sort alphabetically
+                    .sort()
                     .map(col => (
                     <button
                         key={col}
@@ -363,9 +345,8 @@ const App = () => {
                                     type="monotone" 
                                     dataKey={col} 
                                     name={formatColumnName(col)}
-                                    // Use specific color for System PRC, otherwise cycle
-                                    stroke={col === 'DATA_SYSTEM_PRC' ? '#000000' : COLORS[index % COLORS.length]} 
-                                    strokeWidth={col === 'DATA_SYSTEM_PRC' ? 3 : 2}
+                                    stroke={col.includes('PRC') ? '#000000' : COLORS[index % COLORS.length]} 
+                                    strokeWidth={col.includes('PRC') ? 3 : 2}
                                     dot={false}
                                     activeDot={{ r: 6 }}
                                     isAnimationActive={false} 
