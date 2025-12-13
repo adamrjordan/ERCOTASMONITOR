@@ -10,7 +10,7 @@ const BRANCH_NAME = "main";
 const CSV_FILENAME = "ercot_ancillary_data.csv";
 
 // Construct the raw URL to fetch data directly from the repo
-const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
+const DATA_URL = `https://raw.githubusercontent.com/${adamrjordan}/${ERCOTASMONITOR}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
 const COLUMN_ALIASES = {
   "DATA_SYSTEM_PRC": "System PRC",
