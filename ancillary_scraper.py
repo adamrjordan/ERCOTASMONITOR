@@ -39,13 +39,11 @@ def deep_flatten(dictionary, parent_key='', separator='_'):
     for key, value in dictionary.items():
         # Sanitize the key for the column name
         new_key = parent_key + separator + key if parent_key else key
-        # Use only upper case letters and underscores for column names
         new_key_clean = new_key.replace(" ", "_").replace(":", "_").replace(".", "_").replace("-", "_").upper()
         
         if isinstance(value, list):
             
-            # 1. CRITICAL FIX: Check for list of [key, value] pairs (The ERCOT Dashboard format)
-            # This is the most common format for the specific metrics
+            # 1. CRITICAL: Check for list of [key, value] pairs (The ERCOT Dashboard format)
             is_key_value_list = all(isinstance(item, list) and len(item) == 2 and isinstance(item[0], str) for item in value)
 
             if is_key_value_list:
@@ -80,10 +78,33 @@ def deep_flatten(dictionary, parent_key='', separator='_'):
     return dict(items)
 
 
+def filter_redundant_fields(record):
+    """Filters out columns that are clearly redundant noise from the flattening process."""
+    filtered_record = {}
+    redundant_suffixes = ['_TYPE', '_SERVICE', '_NAME', '_LABEL', '_DESCRIPTION', '_KEY', '_VALUE']
+    
+    for key, value in record.items():
+        # Keep all timestamp/system fields
+        if key in ['SCRAPE_TIMESTAMP_UTC', 'ERCOT_LAST_UPDATE']:
+            filtered_record[key] = value
+            continue
+            
+        # Skip if the key ends with a redundant suffix
+        if any(key.endswith(suffix) for suffix in redundant_suffixes):
+            continue
+            
+        # Skip if the value is empty or None (unless it's a critical metric)
+        if value is None or value == "":
+            continue
+            
+        filtered_record[key] = value
+        
+    return filtered_record
+
+
 def flatten_data(json_data):
     """
-    Sets up the initial record and calls the deep_flatten function 
-    on the main data payload.
+    Sets up the initial record, calls deep_flatten, and filters the result.
     """
     if not json_data:
         return None
@@ -93,46 +114,49 @@ def flatten_data(json_data):
         'scrape_timestamp_utc': datetime.datetime.utcnow().isoformat()
     }
 
-    # Extract the timestamp from the data itself if present
     ercot_last_update = json_data.get('lastUpdate')
     if ercot_last_update:
         flat_record['ercot_last_update'] = ercot_last_update
     
-    # We only want to flatten the key that contains all the actual dashboard metrics
+    # Flatten the main data structure
     raw_data = json_data.get('data', {})
-    
-    # Extend the flat_record with all the extracted data
-    # We flatten the raw_data block directly
     flat_record.update(deep_flatten(raw_data, parent_key='DATA'))
+    
+    # Prune unnecessary columns before saving
+    return filter_redundant_fields(flat_record)
 
-    return flat_record
 
 def save_to_csv(record):
     """Saves the flattened data record to the CSV file, ensuring column alignment."""
     if not record:
         return
 
-    df = pd.DataFrame([record])
+    df_new_row = pd.DataFrame([record])
+    total_rows = len(df_new_row)
 
     if not os.path.exists(DATA_FILE):
         # File doesn't exist, create it
-        df.to_csv(DATA_FILE, index=False)
+        df_new_row.to_csv(DATA_FILE, index=False)
         print(f"Created {DATA_FILE} with {len(record)} columns.")
     else:
         # File exists, append new data
         try:
-            existing_df = pd.read_csv(DATA_FILE)
+            # CRITICAL FIX: Ensure the file is read correctly.
+            existing_df = pd.read_csv(DATA_FILE, keep_default_na=False) # Important for preserving empty strings/NAs
             
             # Concatenate: pandas handles missing columns by filling with NaN
-            updated_df = pd.concat([existing_df, df], ignore_index=True)
+            updated_df = pd.concat([existing_df, df_new_row], ignore_index=True)
+            total_rows = len(updated_df)
             
             # Write back the full dataset
             updated_df.to_csv(DATA_FILE, index=False)
-            print(f"Appended data. Total rows: {len(updated_df)}")
+            print(f"Appended 1 row. Total rows: {total_rows}")
         except Exception as e:
-            # Catch file read/write errors (e.g., if the file was committed blank)
-            print(f"Error appending to CSV: {e}. Writing new file with current record.")
-            df.to_csv(DATA_FILE, index=False)
+            # If reading the old file fails (e.g., corruption, weird format), just overwrite with the single new row.
+            print(f"CRITICAL: Failed to read existing CSV ({e}). Overwriting with current record to continue service.")
+            df_new_row.to_csv(DATA_FILE, index=False)
+            total_rows = 1
+            print(f"Total rows: {total_rows}")
 
 
 def main():
@@ -143,16 +167,15 @@ def main():
         print("Data fetched successfully. Flattening...")
         flat_record = flatten_data(json_data)
         
-        # Check for substantial data (more than just the 2 timestamp fields)
-        # Using a confidence threshold of at least 5 meaningful data points
-        if flat_record and len(flat_record) > 5: 
-            print(f"Successfully captured {len(flat_record)} fields.")
+        # We expect many fields (e.g., 50+)
+        if flat_record and len(flat_record) > 50: 
+            print(f"Successfully captured {len(flat_record)} DISTINCT fields.")
             print("Saving to CSV...")
             save_to_csv(flat_record)
             print("Done.")
         else:
-            print(f"Extraction failed: Only {len(flat_record)} fields found (expected > 5).")
-            # CRITICAL: Exit with an error code to prevent GitHub from committing a blank/incomplete row.
+            print(f"Extraction failed: Only {len(flat_record)} fields found (expected > 50).")
+            # Exit with an error code to prevent GitHub from committing a blank/incomplete row.
             exit(1) 
     else:
         print("Failed to retrieve data. Check API availability or logs above.")
@@ -160,5 +183,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
