@@ -3,14 +3,14 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { Upload, Calendar, Search, Filter, Activity, Zap, Clock, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 
 // --- CONFIGURATION ---
-// IMPORTANT: REPLACE THESE WITH YOUR GITHUB USERNAME AND REPO NAME
+// ✅ FIXED: Pre-filled with quotes for your specific repo
 const GITHUB_USERNAME = "adamrjordan"; 
 const REPO_NAME = "ERCOTASMONITOR";
 const BRANCH_NAME = "main";
 const CSV_FILENAME = "ercot_ancillary_data.csv";
 
 // Construct the raw URL to fetch data directly from the repo
-const DATA_URL = `https://raw.githubusercontent.com/${adamrjordan}/${ERCOTASMONITOR}/${BRANCH_NAME}/${CSV_FILENAME}`;
+const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
 const COLUMN_ALIASES = {
   "DATA_SYSTEM_PRC": "System PRC",
@@ -30,32 +30,27 @@ const COLORS = [
   "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
 ];
 
-// --- VANILLA JS CSV PARSER (REPLACING PAPAPARSE) ---
+// --- VANILLA JS CSV PARSER ---
 const simpleCSVParse = (csvText) => {
-    // Basic split by line, skipping blank lines
     const lines = csvText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return [];
 
-    // Simple header parsing (using comma delimiter)
     const headers = lines[0].split(',').map(h => h.trim());
     const parsedData = [];
 
     for (let i = 1; i < lines.length; i++) {
-        // Simple split by comma for values. This assumes no quotes or complex CSV structure.
         const values = lines[i].split(',');
-        // Skip malformed rows
         if (values.length !== headers.length) continue;
 
         const row = {};
         headers.forEach((header, index) => {
             const val = values[index]?.trim();
-            row[header] = val; // Store as string initially, conversion happens in processData
+            row[header] = val; 
         });
         parsedData.push(row);
     }
     return parsedData;
 };
-
 
 const App = () => {
   const [rawData, setRawData] = useState([]);
@@ -79,9 +74,7 @@ const App = () => {
         newRow.displayTime = new Date(row.scrape_timestamp_utc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         newRow.fullDate = row.scrape_timestamp_utc;
       }
-      // Convert numeric strings to actual numbers
       headers.forEach(h => {
-          // Check if the key exists, is not the timestamp, and can be converted to a number
           if(h !== 'scrape_timestamp_utc' && row[h] !== undefined && row[h] !== null && !isNaN(Number(row[h]))) {
               newRow[h] = Number(row[h]);
           }
@@ -95,7 +88,7 @@ const App = () => {
       !h.toLowerCase().includes('timestamp') && 
       !h.toLowerCase().includes('update') &&
       !h.toLowerCase().includes('type') &&
-      !h.toLowerCase().includes('index') // Filter out temporary index columns
+      !h.toLowerCase().includes('index')
     );
     setColumns(metricCols);
 
@@ -108,33 +101,24 @@ const App = () => {
   };
 
   const fetchData = async () => {
-    // Check if configuration placeholders are still active
-    if (GITHUB_USERNAME === "YOUR_USERNAME_HERE" || REPO_NAME === "YOUR_REPO_NAME_HERE") {
-        setError("Configuration Error: Please update GITHUB_USERNAME and REPO_NAME in App.jsx.");
-        return;
-    }
-
     setLoading(true);
     setError(null);
     try {
       const response = await fetch(DATA_URL);
       if (!response.ok) {
-        // Provide more descriptive error for HTTP failures
         const status = response.status;
         let errMsg = `Failed to fetch data (Status: ${status}).`;
         if (status === 404) {
-             errMsg = "404 Not Found. Check if the CSV file exists in your repo and the GITHUB_USERNAME/REPO_NAME are correct.";
+             errMsg = "404 Not Found. Check if the CSV file exists in your repo.";
         } else if (status === 403) {
-             errMsg = "403 Forbidden. Ensure your repo is public and the branch name is correct.";
+             errMsg = "403 Forbidden. Ensure your repo is public.";
         }
         throw new Error(errMsg);
       }
       
       const csvText = await response.text();
+      const results = simpleCSVParse(csvText);
       
-      const results = simpleCSVParse(csvText); // Use custom parser
-      
-      // Filter out rows that are entirely empty or invalid
       const cleanData = results.filter(row => 
         Object.values(row).some(val => val !== "" && val !== null && val !== undefined)
       );
@@ -163,7 +147,7 @@ const App = () => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const csvText = e.target.result;
-        const results = simpleCSVParse(csvText); // Use custom parser
+        const results = simpleCSVParse(csvText);
         processData(results);
       };
       reader.readAsText(file);
@@ -298,11 +282,6 @@ const App = () => {
                     <div className="flex-1 flex flex-col items-center justify-center text-red-500">
                         <Activity size={48} className="mb-4" />
                         <p className="text-center max-w-lg">{error}</p>
-                        {(GITHUB_USERNAME === "YOUR_USERNAME_HERE" || REPO_NAME === "YOUR_REPO_NAME_HERE") && (
-                            <p className="mt-4 text-sm text-red-700 font-medium">
-                                ACTION REQUIRED: Please edit web/src/App.jsx and replace the placeholder values for GITHUB_USERNAME and REPO_NAME.
-                            </p>
-                        )}
                     </div>
                 ) : filteredData.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
