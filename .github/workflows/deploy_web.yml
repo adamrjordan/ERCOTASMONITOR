@@ -22,22 +22,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 # Updated to v4 for stability
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4 # Updated to v4 for stability
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
 
       - name: Install and Build
         working-directory: ./web
         run: |
-          npm ci
+          npm install  # Changed from 'npm ci' to 'npm install' to fix missing lockfile error
           npm run build
 
       - name: Upload artifact
-        # CRITICAL FIX: Upgraded to v3, the current stable version for Pages artifacts
-        uses: actions/upload-pages-artifact@v3 
+        uses: actions/upload-pages-artifact@v3
         with:
           path: ./web/dist
 
@@ -50,5 +49,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        # CRITICAL FIX: Upgraded to v4, the current stable deployment version
         uses: actions/deploy-pages@v4
