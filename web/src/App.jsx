@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Bug } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Bug, Zap } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -23,25 +23,21 @@ const COLORS = [
 
 // --- PARSER ---
 const simpleCSVParse = (csvText) => {
-    // 1. Strip Byte Order Mark (BOM) if present to prevent header corruption
+    // Strip Byte Order Mark (BOM)
     const cleanText = csvText.replace(/^\ufeff/, '');
-    
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return { headers: [], data: [] };
 
-    // 2. Handle potential quoted headers
     const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
     const parsedData = [];
 
     for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',');
-        // Allow leniency for trailing commas
         if (values.length < headers.length) continue;
 
         const row = {};
         headers.forEach((header, index) => {
             const val = values[index]?.trim();
-            // Remove quotes if present
             row[header] = val ? val.replace(/['"]+/g, '') : val; 
         });
         parsedData.push(row);
@@ -52,7 +48,6 @@ const simpleCSVParse = (csvText) => {
 const App = () => {
   const [rawData, setRawData] = useState([]);
   const [columns, setColumns] = useState([]);
-  const [headersDebug, setHeadersDebug] = useState([]); // For debugging
   const [selectedColumns, setSelectedColumns] = useState(['DATA_SYSTEM_PRC']);
   const [filterText, setFilterText] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -64,47 +59,42 @@ const App = () => {
   const formatColumnName = (col) => {
     if (COLUMN_ALIASES[col]) return COLUMN_ALIASES[col];
     
-    // Auto-Formatter for unknown columns
+    // Aggressive shortening of the long ERCOT names
     let name = col
         .replace(/^DATA_/, '')
         .replace(/_GROUP/, '')
-        .replace(/CAPABILITYGROUP/, '')
-        .replace(/AWARDSGROUP/, '')
+        .replace(/RESPONSIVERESERVECAPABILITYGROUP/, 'RRS Cap')
+        .replace(/RESPONSIVERESERVEAWARDSGROUP/, 'RRS Award')
+        .replace(/ERCOTCONTINGENCYRESERVECAPABILITYGROUP/, 'ECRS Cap')
+        .replace(/ERCOTCONTINGENCYRESERVEAWARDSGROUP/, 'ECRS Award')
+        .replace(/NONSPINRESERVECAPABILITYGROUP/, 'NonSpin Cap')
+        .replace(/NONSPINRESERVEAWARDSGROUP/, 'NonSpin Award')
+        .replace(/REGULATIONSERVICECAPABILITYGROUP/, 'Reg Cap')
+        .replace(/REGULATIONSERVICEAWARDSGROUP/, 'Reg Award')
+        .replace(/CAPABILITYGROUP/, 'Cap')
+        .replace(/AWARDSGROUP/, 'Award')
         .replace(/_/g, ' ');
         
-    // Convert to Title Case
-    name = name.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-    
-    // Fix Acronyms
-    name = name
-        .replace(/\bPrc\b/i, 'PRC')
-        .replace(/\bRrs\b/i, 'RRS')
-        .replace(/\bEcrs\b/i, 'ECRS')
-        .replace(/\bNsr\b/i, 'Non-Spin')
-        .replace(/\bEsr\b/i, 'ESR')
-        .replace(/\bGen\b/i, 'Gen')
-        .replace(/\bCap\b/i, 'Cap');
+    // Clean up casing
+    name = name.split(' ').map(word => {
+         // Keep known acronyms uppercase, title case others
+         if (['RRS', 'ECRS', 'PRC', 'ESR', 'QS', 'CLR', 'NCLR'].includes(word.toUpperCase())) return word.toUpperCase();
+         return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
 
     return name;
   };
 
   const processData = (resultObj) => {
     const { headers, data: parsedData } = resultObj;
-    setHeadersDebug(headers); // Save for debug view
 
     if (!parsedData || parsedData.length < 1) return;
 
-    // 3. Dynamic Timestamp Detection (Case-insensitive)
+    // Dynamic Timestamp Detection
     const timestampCol = headers.find(h => h.toLowerCase().includes('timestamp') || h.toLowerCase().includes('date'));
     
-    if (!timestampCol) {
-        console.warn("No timestamp column found in headers:", headers);
-    }
-
     const processed = parsedData.map(row => {
       const newRow = { ...row };
-      
-      // Use the detected timestamp column
       if (timestampCol && row[timestampCol]) {
         const dateObj = new Date(row[timestampCol]);
         if (!isNaN(dateObj)) {
@@ -116,10 +106,9 @@ const App = () => {
 
       headers.forEach(h => {
           let val = row[h];
-          if (typeof val === 'string') {
-             if (val.startsWith('[')) return; 
-          }
-          // Convert to number if possible
+          // Filter out garbage text data if it sneaks in
+          if (typeof val === 'string' && (val.startsWith('[') || val.toLowerCase() === 'value')) return; 
+          
           if(h !== timestampCol && val !== undefined && val !== null && val !== '' && !isNaN(Number(val))) {
               newRow[h] = Number(val);
           }
@@ -127,7 +116,6 @@ const App = () => {
       return newRow;
     });
 
-    // Filter valid rows (must have timestamp)
     const validData = processed.filter(d => d.timestamp);
     validData.sort((a, b) => a.timestamp - b.timestamp);
 
@@ -147,9 +135,7 @@ const App = () => {
     // Smart default selection
     if (metricCols.length > 0) {
         const currentIsValid = selectedColumns.every(sc => metricCols.includes(sc));
-        
         if (!currentIsValid || selectedColumns.length === 0) {
-            // Try to find PRC, otherwise pick the first available column
             const prcCol = metricCols.find(c => c.includes('PRC'));
             setSelectedColumns([prcCol || metricCols[0]]);
         }
@@ -158,9 +144,9 @@ const App = () => {
     if (validData.length > 0) {
        const lastTime = validData[validData.length - 1].timestamp;
        const startTime = validData[0].timestamp;
-       // Default zoom to last 24h
-       const oneDay = 24 * 60 * 60 * 1000;
-       const start = startTime > (lastTime - oneDay) ? startTime : (lastTime - oneDay);
+       // Default to 6 hours or full range
+       const zoomWindow = 6 * 60 * 60 * 1000;
+       const start = startTime > (lastTime - zoomWindow) ? startTime : (lastTime - zoomWindow);
        
        setDateRange({
         start: new Date(start).toISOString().slice(0, 16),
@@ -175,18 +161,17 @@ const App = () => {
     try {
       const response = await fetch(`${DATA_URL}?t=${Date.now()}`);
       if (!response.ok) {
-        if (response.status === 404) throw new Error("CSV file not found. Did you delete it? Wait for the scraper to run (approx 5 mins).");
+        if (response.status === 404) throw new Error("CSV file not found. Please wait for the scraper to run (approx 5 mins).");
         throw new Error(`Failed to fetch (${response.status})`);
       }
       
       const csvText = await response.text();
       const results = simpleCSVParse(csvText);
-      const cleanData = results.data.filter(row => Object.keys(row).length > 1);
-
-      if (cleanData.length === 0) {
+      
+      if (results.data.length === 0) {
         setError("CSV is empty. Please wait for the scraper to collect data.");
       } else {
-        processData(results); // Pass full result object
+        processData(results);
       }
       setLoading(false);
       
@@ -370,15 +355,9 @@ const App = () => {
                     </ResponsiveContainer>
                 ) : (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                        <Bug size={48} className="mb-4 opacity-50"/>
-                        <p className="font-bold">No valid data found</p>
-                        <p className="text-sm mt-2 max-w-md text-center">
-                           Found {headersDebug.length} headers. 
-                           {headersDebug.length > 0 ? "First 3: " + headersDebug.slice(0,3).join(", ") : "Is the file empty?"}
-                        </p>
-                        <p className="text-xs text-slate-500 mt-4">
-                            Looking for a timestamp column in: {headersDebug.filter(h => h.toLowerCase().includes('time') || h.toLowerCase().includes('date')).join(', ') || "None found"}
-                        </p>
+                        <Zap size={48} className="mb-4 opacity-50"/>
+                        <p className="font-bold">No data found</p>
+                        <p className="text-sm mt-2">If you deleted the CSV, wait a few minutes for the scraper to run.</p>
                     </div>
                 )}
             </div>
