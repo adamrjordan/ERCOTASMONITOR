@@ -30,86 +30,82 @@ def fetch_data():
         return None
 
 def deep_flatten(dictionary, parent_key='', separator='_'):
-    """Recursively flattens a nested dictionary and list structure."""
+    """Recursively flattens a nested dictionary and list structure, ignoring metadata."""
     items = []
     
     if not isinstance(dictionary, dict):
         return {}
 
     for key, value in dictionary.items():
+        # 1. IMPROVEMENT: Skip metadata keys that cause garbage columns
+        if key.lower() in ['columns', 'column', 'headers', 'header', 'definitions', 'meta', 'types']:
+            continue
+
         # Sanitize the key for the column name
         new_key = parent_key + separator + key if parent_key else key
         new_key_clean = new_key.replace(" ", "_").replace(":", "_").replace(".", "_").replace("-", "_").upper()
         
         if isinstance(value, list):
-            
-            # 1. CRITICAL: Check for list of [key, value] pairs (The ERCOT Dashboard format)
+            # Check for list of [key, value] pairs (The ERCOT Dashboard format)
             is_key_value_list = all(isinstance(item, list) and len(item) == 2 and isinstance(item[0], str) for item in value)
 
             if is_key_value_list:
-                # Use the field name (item[0]) as the final key part
                 for item_list in value:
                     field_name = item_list[0].replace(" ", "_").replace("-", "_").upper()
                     final_key = f"{new_key_clean}_{field_name}"
                     items.append((final_key, item_list[1]))
             
-            # 2. Standard: Check for list of dictionaries (like AS product rows, e.g., 'rows')
+            # Check for list of dictionaries
             elif all(isinstance(item, dict) for item in value):
-                # Iterate through each item, trying to find a unique identifier
                 for i, row in enumerate(value):
-                    # Prioritize descriptive keys (type, service, name, label)
                     item_id = row.get('type') or row.get('service') or row.get('name') or row.get('label') or f"INDEX{i}"
                     item_prefix = f"{new_key_clean}_{item_id}".upper().replace(" ", "_")
                     items.extend(deep_flatten(row, item_prefix, separator=separator).items())
             
-            # 3. Fallback for simple lists (should be rare)
             else:
-                 for i, item in enumerate(value):
-                    items.append((f"{new_key_clean}_INDEX_{i}", item))
+                 # Skip simple lists to avoid indexing garbage
+                 continue
         
         elif isinstance(value, dict):
-             # 4. Standard: Recurse into nested dictionary
              items.extend(deep_flatten(value, new_key_clean, separator=separator).items())
         
         else:
-            # 5. Found a scalar value (int, float, string, bool)
             items.append((new_key_clean, value))
             
     return dict(items)
 
-
-def filter_redundant_fields(record):
-    """Filters out columns that are clearly redundant noise from the flattening process."""
-    filtered_record = {}
-    redundant_suffixes = ['_TYPE', '_SERVICE', '_NAME', '_LABEL', '_DESCRIPTION', '_KEY', '_VALUE']
+def filter_junk_data(record):
+    """
+    2. IMPROVEMENT: Scans the final record and removes any field 
+    where the value is just a metadata string label like 'value' or 'type'.
+    """
+    clean_record = {}
+    
+    # Metadata strings we want to purge if they appear as data values
+    garbage_values = {'value', 'key', 'name', 'type', 'label', 'string', 'number', 'boolean'}
     
     for key, value in record.items():
-        # Keep all timestamp/system fields
-        if key in ['SCRAPE_TIMESTAMP_UTC', 'ERCOT_LAST_UPDATE']:
-            filtered_record[key] = value
+        # Keep timestamps
+        if 'TIMESTAMP' in key or 'UPDATE' in key:
+            clean_record[key] = value
             continue
             
-        # Skip if the key ends with a redundant suffix
-        if any(key.endswith(suffix) for suffix in redundant_suffixes):
-            continue
-            
-        # Skip if the value is empty or None (unless it's a critical metric)
-        if value is None or value == "":
-            continue
-            
-        filtered_record[key] = value
+        # If the value is a string, check if it's garbage
+        if isinstance(value, str):
+            if value.lower() in garbage_values:
+                continue
+            # If it's a list string representation, skip it
+            if value.startswith('['):
+                continue
+                
+        clean_record[key] = value
         
-    return filtered_record
-
+    return clean_record
 
 def flatten_data(json_data):
-    """
-    Sets up the initial record, calls deep_flatten, and filters the result.
-    """
     if not json_data:
         return None
 
-    # Base record with scrape timestamp
     flat_record = {
         'scrape_timestamp_utc': datetime.datetime.utcnow().isoformat()
     }
@@ -118,46 +114,40 @@ def flatten_data(json_data):
     if ercot_last_update:
         flat_record['ercot_last_update'] = ercot_last_update
     
-    # Flatten the main data structure
     raw_data = json_data.get('data', {})
-    flat_record.update(deep_flatten(raw_data, parent_key='DATA'))
     
-    # Prune unnecessary columns before saving
-    return filter_redundant_fields(flat_record)
-
+    # Flatten
+    flattened = deep_flatten(raw_data, parent_key='DATA')
+    
+    # Update record
+    flat_record.update(flattened)
+    
+    # Filter
+    return filter_junk_data(flat_record)
 
 def save_to_csv(record):
-    """Saves the flattened data record to the CSV file, ensuring column alignment."""
     if not record:
         return
 
     df_new_row = pd.DataFrame([record])
-    total_rows = len(df_new_row)
 
     if not os.path.exists(DATA_FILE):
-        # File doesn't exist, create it
         df_new_row.to_csv(DATA_FILE, index=False)
         print(f"Created {DATA_FILE} with {len(record)} columns.")
     else:
-        # File exists, append new data
         try:
-            # CRITICAL FIX: Ensure the file is read correctly.
-            existing_df = pd.read_csv(DATA_FILE, keep_default_na=False) # Important for preserving empty strings/NAs
+            # Read existing, but if it has way more columns (garbage), we might want to align to NEW schema
+            existing_df = pd.read_csv(DATA_FILE)
             
-            # Concatenate: pandas handles missing columns by filling with NaN
+            # Identify columns in the new row that aren't in the old file
+            # If the old file is full of garbage, this append might still look messy until deleted
             updated_df = pd.concat([existing_df, df_new_row], ignore_index=True)
-            total_rows = len(updated_df)
             
-            # Write back the full dataset
             updated_df.to_csv(DATA_FILE, index=False)
-            print(f"Appended 1 row. Total rows: {total_rows}")
+            print(f"Appended 1 row. Total rows: {len(updated_df)}")
         except Exception as e:
-            # If reading the old file fails (e.g., corruption, weird format), just overwrite with the single new row.
-            print(f"CRITICAL: Failed to read existing CSV ({e}). Overwriting with current record to continue service.")
+            print(f"Error appending: {e}. Overwriting file.")
             df_new_row.to_csv(DATA_FILE, index=False)
-            total_rows = 1
-            print(f"Total rows: {total_rows}")
-
 
 def main():
     print("Fetching ERCOT data...")
@@ -167,18 +157,17 @@ def main():
         print("Data fetched successfully. Flattening...")
         flat_record = flatten_data(json_data)
         
-        # We expect many fields (e.g., 50+)
-        if flat_record and len(flat_record) > 50: 
-            print(f"Successfully captured {len(flat_record)} DISTINCT fields.")
+        # We expect a good number of fields, but filtered of garbage
+        if flat_record and len(flat_record) > 20: 
+            print(f"Successfully captured {len(flat_record)} clean data fields.")
             print("Saving to CSV...")
             save_to_csv(flat_record)
             print("Done.")
         else:
-            print(f"Extraction failed: Only {len(flat_record)} fields found (expected > 50).")
-            # Exit with an error code to prevent GitHub from committing a blank/incomplete row.
+            print(f"Extraction failed: Only {len(flat_record)} fields found.")
             exit(1) 
     else:
-        print("Failed to retrieve data. Check API availability or logs above.")
+        print("Failed to retrieve data.")
         exit(1)
 
 if __name__ == "__main__":
