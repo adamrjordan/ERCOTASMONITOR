@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Bug } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Calendar, Layout, Filter } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -15,7 +15,48 @@ const COLORS = [
   "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
 ];
 
-// --- PARSER ---
+// --- UTILS ---
+
+// Helper to format ticks: Date at midnight, Time otherwise
+const formatTick = (timestamp) => {
+    const d = new Date(timestamp);
+    const h = d.getHours();
+    if (h === 0) {
+        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
+// Helper to generate 6-hour interval ticks
+const getSixHourTicks = (start, end) => {
+    const ticks = [];
+    let current = new Date(start);
+    
+    // Round up to nearest 6 hour mark
+    current.setMinutes(0, 0, 0);
+    const hour = current.getHours();
+    const remainder = hour % 6;
+    // Add hours to reach next 6h mark, unless we are exactly on one
+    const add = remainder === 0 ? 0 : (6 - remainder);
+    current.setHours(hour + add);
+
+    while (current.getTime() <= end) {
+        ticks.push(current.getTime());
+        current.setHours(current.getHours() + 6);
+    }
+    return ticks;
+};
+
+// Local Time Formatter for Inputs
+const toLocalISOString = (dateObj) => {
+  const pad = (n) => n < 10 ? '0' + n : n;
+  return dateObj.getFullYear() +
+    '-' + pad(dateObj.getMonth() + 1) +
+    '-' + pad(dateObj.getDate()) +
+    'T' + pad(dateObj.getHours()) +
+    ':' + pad(dateObj.getMinutes());
+};
+
 const simpleCSVParse = (csvText) => {
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
@@ -46,19 +87,43 @@ const App = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [showDebug, setShowDebug] = useState(false);
 
   // --- COLUMN NAME FORMATTER ---
   const formatColumnName = (col) => {
     if (!col) return "";
-    let name = col.replace(/^DATA_/, '').replace(/_/g, ' ');
-    // Strip group names
-    const groups = ['RESPONSIVERESERVECAPABILITYGROUP','RESPONSIVERESERVEAWARDSGROUP','ERCOTCONTINGENCYRESERVECAPABILITYGROUP','ERCOTCONTINGENCYRESERVEAWARDSGROUP','NONSPINRESERVECAPABILITYGROUP','NONSPINRESERVEAWARDSGROUP','REGULATIONSERVICECAPABILITYGROUP','REGULATIONSERVICEAWARDSGROUP','SYSTEM'];
-    groups.forEach(g => { name = name.replace(g, ''); });
-    
-    // Clean Suffixes & Title Case
-    name = name.replace(/RRCCAP/i,'').replace(/RRAWD/i,'').replace(/ECRSCAP/i,'').replace(/ECRSAWD/i,'').replace(/NSRCAP/i,'').replace(/NSRAWD/i,'').replace(/REGUPCAP/i,'Up').replace(/REGDOWNCAP/i,'Down').replace(/SYSTEMLAMBDA/i,'Lambda');
-    return name.trim().toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    let name = col
+        .replace(/^DATA_/, '')
+        .replace(/RESPONSIVERESERVECAPABILITYGROUP_?/, 'RRS Cap ')
+        .replace(/RESPONSIVERESERVEAWARDSGROUP_?/, 'RRS Award ')
+        .replace(/ERCOTCONTINGENCYRESERVECAPABILITYGROUP_?/, 'ECRS Cap ')
+        .replace(/ERCOTCONTINGENCYRESERVEAWARDSGROUP_?/, 'ECRS Award ')
+        .replace(/NONSPINRESERVECAPABILITYGROUP_?/, 'NonSpin Cap ')
+        .replace(/NONSPINRESERVEAWARDSGROUP_?/, 'NonSpin Award ')
+        .replace(/REGULATIONSERVICECAPABILITYGROUP_?/, 'Reg Cap ')
+        .replace(/REGULATIONSERVICEAWARDSGROUP_?/, 'Reg Award ')
+        .replace(/SYSTEM_?/, 'System ')
+        .replace(/_GROUP/, '')
+        .replace(/_/g, ' ');
+
+    name = name
+        .replace(/RRCCAP/i, '')
+        .replace(/RRAWD/i, '')
+        .replace(/ECRSCAP/i, '')
+        .replace(/ECRSAWD/i, '')
+        .replace(/NSRCAP/i, '')
+        .replace(/NSRAWD/i, '')
+        .replace(/REGUPCAP/i, 'Up ')
+        .replace(/REGDOWNCAP/i, 'Down ')
+        .replace(/SYSTEMLAMBDA/i, 'Lambda');
+
+    name = name.toLowerCase().split(' ').map(word => {
+         if (['RRS', 'ECRS', 'PRC', 'ESR', 'QS', 'CLR', 'NCLR', 'PFR', 'FFR', 'GEN', 'LR'].includes(word.toUpperCase())) {
+             return word.toUpperCase();
+         }
+         return word.charAt(0).toUpperCase() + word.slice(1);
+    }).join(' ');
+
+    return name.trim();
   };
 
   const processData = (resultObj) => {
@@ -73,7 +138,11 @@ const App = () => {
          const d = new Date(row[timestampCol]);
          if (!isNaN(d)) {
             newRow.ts = d.getTime();
-            newRow.displayTime = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+            // Full formatted string for tooltip
+            newRow.displayTime = d.toLocaleString([], {
+                month: 'short', day: 'numeric', 
+                hour: '2-digit', minute: '2-digit'
+            });
          }
       }
       headers.forEach(h => {
@@ -88,26 +157,23 @@ const App = () => {
     const validData = processed.filter(d => d.ts).sort((a, b) => a.ts - b.ts);
     setRawData(validData);
     
-    const metrics = headers.filter(h => h !== timestampCol && !h.toLowerCase().includes('update'));
+    const metrics = headers.filter(h => h !== timestampCol);
     setColumns(metrics);
 
     if (selectedColumns.length === 0 && metrics.length > 0) {
-        const prc = metrics.find(m => m.includes('DATA_SYSTEM_PRC'));
+        const prc = metrics.find(m => m.includes('PRC'));
         setSelectedColumns([prc || metrics[0]]);
     }
 
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        // Format to Local ISO for input value
-        const toLocalISO = (ts) => {
-            const d = new Date(ts);
-            const pad = (n) => n < 10 ? '0'+n : n;
-            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        };
+        // Default Zoom: Last 24 hours to show the day cycles clearly
+        const zoom = Math.max(start, last - (24 * 60 * 60 * 1000));
+        
         setDateRange({
-            start: toLocalISO(start),
-            end: toLocalISO(last)
+            start: toLocalISOString(new Date(zoom)),
+            end: toLocalISOString(new Date(last))
         });
     }
   };
@@ -117,7 +183,7 @@ const App = () => {
     setError(null);
     try {
       const response = await fetch(`${DATA_URL}?t=${Date.now()}`);
-      if (!response.ok) throw new Error("CSV not found. Check GitHub repo.");
+      if (!response.ok) throw new Error("CSV not found or access denied.");
       const text = await response.text();
       const results = simpleCSVParse(text);
       if (results.data.length === 0) throw new Error("CSV is empty");
@@ -151,6 +217,14 @@ const App = () => {
     return rawData.filter(d => d.ts >= start && d.ts <= end);
   }, [rawData, dateRange]);
 
+  // Generate ticks based on the filtered data range
+  const xAxisTicks = useMemo(() => {
+      if (filteredData.length === 0) return [];
+      const start = filteredData[0].ts;
+      const end = filteredData[filteredData.length - 1].ts;
+      return getSixHourTicks(start, end);
+  }, [filteredData]);
+
   const toggleColumn = (col) => {
     setSelectedColumns(prev => 
       prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
@@ -162,120 +236,204 @@ const App = () => {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm z-10 flex-shrink-0">
+      
+      {/* --- HEADER --- */}
+      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-20 flex-shrink-0 h-16">
         <div className="flex items-center gap-3">
-          <div className="bg-blue-600 p-2 rounded-lg text-white"><Activity size={24} /></div>
+          <div className="bg-slate-900 p-2 rounded-lg text-white">
+            <Activity size={20} />
+          </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-800">ERCOT Capacity Monitor</h1>
-            <p className="text-xs text-slate-500">{loading ? "Syncing..." : "Live Data"}</p>
+            <h1 className="text-lg font-bold text-slate-800 leading-tight">ERCOT Monitor</h1>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{loading ? "SYNCING..." : "LIVE DASHBOARD"}</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-           <div className="text-right hidden sm:block">
-              <span className="text-xs font-bold text-slate-400 block uppercase">System PRC</span>
-              <span className={`text-xl font-bold ${currentPRC && currentPRC < 2300 ? 'text-red-600' : 'text-emerald-600'}`}>
-                 {currentPRC ? currentPRC.toFixed(0) : '--'} MW
+
+        <div className="flex items-center gap-6">
+           <div className="hidden md:flex flex-col items-end">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">System PRC</span>
+              <span className={`text-xl font-bold font-mono ${currentPRC && currentPRC < 2300 ? 'text-red-600' : 'text-emerald-600'}`}>
+                 {currentPRC ? currentPRC.toFixed(0) : '--'} <span className="text-sm text-slate-400 font-normal">MW</span>
               </span>
            </div>
            
-           <button onClick={() => setShowDebug(!showDebug)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 text-slate-500" title="Debug Info">
-             <Bug size={16} />
-           </button>
+           <div className="h-8 w-px bg-slate-200 mx-2 hidden md:block"></div>
 
-           <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200" title="Reload CSV">
-             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-           </button>
-           
-           <label className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 cursor-pointer transition-colors text-sm font-medium border border-blue-100">
-            <Upload size={16} />
-            <span className="hidden sm:inline">Upload CSV</span>
-            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
-          </label>
+           <div className="flex items-center gap-2">
+                <button onClick={fetchData} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 hover:text-slate-900 transition-colors" title="Reload Data">
+                    <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+                </button>
+                
+                <label className="flex items-center gap-2 px-3 py-2 bg-slate-900 text-white rounded-md hover:bg-slate-800 cursor-pointer transition-colors text-sm font-medium shadow-sm">
+                    <Upload size={16} />
+                    <span className="hidden sm:inline">Upload CSV</span>
+                    <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                </label>
+           </div>
         </div>
       </header>
 
+      {/* --- MAIN LAYOUT --- */}
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Sidebar */}
-        <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative`}>
-            <div className="p-4 border-b border-slate-100 space-y-4">
-                <div className="relative">
+        
+        {/* --- SIDEBAR --- */}
+        <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative z-10`}>
+            
+            {/* Filter Section */}
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50 space-y-4">
+               
+               {/* Search */}
+               <div className="relative">
                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
-                   <input type="text" placeholder="Search metrics..." className="w-full pl-9 pr-3 py-2 bg-slate-50 border rounded-md text-sm"
-                    value={filterText} onChange={e => setFilterText(e.target.value)} />
+                   <input 
+                    type="text" 
+                    placeholder="Filter metrics..." 
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all"
+                    value={filterText} 
+                    onChange={e => setFilterText(e.target.value)} 
+                   />
                </div>
+
+               {/* Date Range */}
                <div className="space-y-2">
-                   <label className="text-xs font-bold text-slate-500 uppercase">Time Range</label>
-                   <input type="datetime-local" className="w-full text-xs border rounded px-2 py-1"
-                    value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} />
-                   <input type="datetime-local" className="w-full text-xs border rounded px-2 py-1"
-                    value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} />
+                   <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                            <Calendar size={10} /> Time Range
+                        </label>
+                   </div>
+                   <div className="grid grid-cols-1 gap-2">
+                       <input 
+                        type="datetime-local" 
+                        className="w-full text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                        value={dateRange.start} 
+                        onChange={e => setDateRange({...dateRange, start: e.target.value})} 
+                       />
+                       <input 
+                        type="datetime-local" 
+                        className="w-full text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
+                        value={dateRange.end} 
+                        onChange={e => setDateRange({...dateRange, end: e.target.value})} 
+                       />
+                   </div>
                </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-2">
-                {columns
-                    .filter(c => formatColumnName(c).toLowerCase().includes(filterText.toLowerCase()))
-                    .sort((a, b) => formatColumnName(a).localeCompare(formatColumnName(b)))
-                    .map(col => (
-                    <button key={col} onClick={() => toggleColumn(col)}
-                        className={`w-full text-left px-3 py-2 rounded-md text-sm flex justify-between group transition-colors ${selectedColumns.includes(col) ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>
-                        <span className="truncate" title={col}>{formatColumnName(col)}</span>
-                        {selectedColumns.includes(col) && <div className="w-2 h-2 rounded-full bg-blue-500" />}
-                    </button>
-                ))}
+
+            {/* Column List */}
+            <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-slate-200">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2 mt-2">Available Metrics</div>
+                <div className="space-y-0.5">
+                    {columns
+                        .filter(c => formatColumnName(c).toLowerCase().includes(filterText.toLowerCase()))
+                        .sort((a, b) => formatColumnName(a).localeCompare(formatColumnName(b)))
+                        .map(col => (
+                        <button 
+                            key={col} 
+                            onClick={() => toggleColumn(col)}
+                            className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between group transition-all duration-200 ${
+                                selectedColumns.includes(col) 
+                                    ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm border border-blue-100' 
+                                    : 'text-slate-600 hover:bg-slate-50 border border-transparent'
+                            }`}
+                        >
+                            <span className="truncate pr-2">{formatColumnName(col)}</span>
+                            {selectedColumns.includes(col) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
+                        </button>
+                    ))}
+                </div>
             </div>
         </aside>
 
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="absolute bottom-4 z-20 bg-white border p-1 rounded-r shadow" style={{left: isSidebarOpen ? '320px' : '0'}}>
-            {isSidebarOpen ? <ChevronDown className="rotate-90" size={16}/> : <ChevronUp className="rotate-90" size={16}/>}
+        {/* Sidebar Toggle */}
+        <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+            className="absolute bottom-6 z-20 bg-white border border-slate-200 border-l-0 p-1.5 rounded-r-md shadow-md text-slate-500 hover:text-slate-800 transition-all" 
+            style={{left: isSidebarOpen ? '320px' : '0'}}
+        >
+            <Layout size={16} />
         </button>
 
-        {/* Main Chart Area */}
-        <main className="flex-1 p-6 bg-slate-50 overflow-auto"> 
+        {/* --- CHART AREA --- */}
+        <main className="flex-1 p-4 bg-slate-100 flex flex-col overflow-hidden relative">
             
-            {/* Debug Overlay */}
-            {showDebug && (
-                <div className="fixed top-20 right-4 z-50 bg-black/90 text-white p-4 rounded text-xs w-96 max-h-96 overflow-auto shadow-xl border border-gray-600">
-                    <h3 className="font-bold border-b mb-2 pb-1">Debug Info</h3>
-                    <p><strong>Raw Data Rows:</strong> {rawData.length}</p>
-                    <p><strong>Filtered Rows:</strong> {filteredData.length}</p>
-                    <p><strong>Columns Found:</strong> {columns.length}</p>
-                    <p><strong>Selected:</strong> {selectedColumns.join(', ')}</p>
-                    <p><strong>Range:</strong> {dateRange.start} <br/>to {dateRange.end}</p>
-                    <pre className="mt-2 bg-gray-800 p-2 rounded">{JSON.stringify(rawData[0], null, 2)}</pre>
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-1 w-full h-full relative overflow-hidden flex flex-col">
+                {/* Chart Header inside card */}
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-white z-10">
+                    <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <Filter size={14} className="text-blue-500" />
+                        {selectedColumns.length > 0 ? 'Selected Metrics Trends' : 'Select metrics to view'}
+                    </h2>
+                    <div className="text-xs text-slate-400 font-mono">
+                        {filteredData.length} pts
+                    </div>
                 </div>
-            )}
 
-            {/* CHART CONTAINER: HARD CODED HEIGHT - NO FLEXBOX TRICKS */}
-            <div className="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-4" style={{ height: '600px' }}>
-                {error ? (
-                    <div className="h-full flex flex-col items-center justify-center text-red-500">
-                        <Activity size={48} className="mb-4" />
-                        <p>{error}</p>
-                    </div>
-                ) : filteredData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={filteredData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
-                            <YAxis stroke="#94a3b8" tick={{fontSize: 12}} domain={['auto', 'auto']} />
-                            <Tooltip 
-                                contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                formatter={(value, name) => [value, formatColumnName(name)]} 
-                            />
-                            <Legend formatter={(value) => formatColumnName(value)} />
-                            <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
-                            {selectedColumns.map((col, idx) => (
-                                <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
-                            ))}
-                        </LineChart>
-                    </ResponsiveContainer>
-                ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                        <EyeOff size={48} className="mb-4 opacity-50"/>
-                        <p>No Data Visible</p>
-                    </div>
-                )}
+                <div className="flex-1 w-full relative min-h-0">
+                    {error ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 bg-white">
+                            <Activity size={48} className="mb-4 opacity-20" />
+                            <p className="font-medium">{error}</p>
+                        </div>
+                    ) : filteredData.length > 0 ? (
+                        <div className="absolute inset-0 pb-2 pr-2 pt-4">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={filteredData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
+                                    
+                                    {/* Customized X Axis with 6h Ticks */}
+                                    <XAxis 
+                                        dataKey="ts" 
+                                        type="number" 
+                                        domain={['dataMin', 'dataMax']} 
+                                        tickFormatter={formatTick}
+                                        ticks={xAxisTicks}
+                                        stroke="#94a3b8" 
+                                        tick={{fontSize: 11, fill: '#64748b'}} 
+                                        tickMargin={10}
+                                        minTickGap={30}
+                                    />
+                                    
+                                    <YAxis 
+                                        stroke="#94a3b8" 
+                                        tick={{fontSize: 11, fill: '#64748b'}} 
+                                        domain={['auto', 'auto']} 
+                                        tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val}
+                                    />
+                                    
+                                    <Tooltip 
+                                        contentStyle={{borderRadius:'8px', border:'1px solid #e2e8f0', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                                        labelFormatter={(label) => new Date(label).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
+                                        formatter={(value, name) => [value, formatColumnName(name)]} 
+                                    />
+                                    
+                                    <Legend 
+                                        formatter={(value) => <span className="text-xs font-medium text-slate-600 ml-1">{formatColumnName(value)}</span>} 
+                                        wrapperStyle={{paddingTop: '10px'}}
+                                    />
+                                    
+                                    {selectedColumns.map((col, idx) => (
+                                        <Line 
+                                            key={col} 
+                                            type="monotone" 
+                                            dataKey={col} 
+                                            name={col} 
+                                            stroke={COLORS[idx % COLORS.length]} 
+                                            strokeWidth={2} 
+                                            dot={false} 
+                                            activeDot={{ r: 5, strokeWidth: 0 }} 
+                                            isAnimationActive={false} 
+                                        />
+                                    ))}
+                                </LineChart>
+                            </ResponsiveContainer>
+                        </div>
+                    ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+                            <EyeOff size={48} className="mb-4 opacity-20"/>
+                            <p className="font-medium text-sm">No data visible in this range</p>
+                            <p className="text-xs mt-1 opacity-70">Adjust the time range on the left</p>
+                        </div>
+                    )}
+                </div>
             </div>
         </main>
       </div>
