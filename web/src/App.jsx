@@ -16,8 +16,6 @@ const COLORS = [
 ];
 
 // --- UTILS ---
-
-// Force Date Input to use Local Time (fixes timezone shifting bug)
 const toLocalISOString = (dateObj) => {
   const pad = (n) => n < 10 ? '0' + n : n;
   return dateObj.getFullYear() +
@@ -27,13 +25,10 @@ const toLocalISOString = (dateObj) => {
     ':' + pad(dateObj.getMinutes());
 };
 
-// Generate Tick Marks every 6 hours (00, 06, 12, 18)
 const getSixHourTicks = (startTs, endTs) => {
     const ticks = [];
     let current = new Date(startTs);
     current.setMinutes(0, 0, 0);
-    
-    // Snap to next 6-hour block
     const hour = current.getHours();
     const remainder = hour % 6;
     const add = remainder === 0 ? 0 : (6 - remainder);
@@ -46,7 +41,6 @@ const getSixHourTicks = (startTs, endTs) => {
     return ticks;
 };
 
-// Tick Formatter: Shows "Dec 14" at midnight, "06:00" otherwise
 const formatTick = (timestamp) => {
     const d = new Date(timestamp);
     if (d.getHours() === 0) {
@@ -55,7 +49,6 @@ const formatTick = (timestamp) => {
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
-// --- PARSER ---
 const simpleCSVParse = (csvText) => {
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
@@ -87,42 +80,13 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // --- COLUMN NAME BEAUTIFIER ---
   const formatColumnName = (col) => {
     if (!col) return "";
-    let name = col
-        .replace(/^DATA_/, '')
-        .replace(/RESPONSIVERESERVECAPABILITYGROUP_?/, 'RRS Cap ')
-        .replace(/RESPONSIVERESERVEAWARDSGROUP_?/, 'RRS Award ')
-        .replace(/ERCOTCONTINGENCYRESERVECAPABILITYGROUP_?/, 'ECRS Cap ')
-        .replace(/ERCOTCONTINGENCYRESERVEAWARDSGROUP_?/, 'ECRS Award ')
-        .replace(/NONSPINRESERVECAPABILITYGROUP_?/, 'NonSpin Cap ')
-        .replace(/NONSPINRESERVEAWARDSGROUP_?/, 'NonSpin Award ')
-        .replace(/REGULATIONSERVICECAPABILITYGROUP_?/, 'Reg Cap ')
-        .replace(/REGULATIONSERVICEAWARDSGROUP_?/, 'Reg Award ')
-        .replace(/SYSTEM_?/, 'System ')
-        .replace(/_GROUP/, '')
-        .replace(/_/g, ' ');
-
-    name = name
-        .replace(/RRCCAP/i, '')
-        .replace(/RRAWD/i, '')
-        .replace(/ECRSCAP/i, '')
-        .replace(/ECRSAWD/i, '')
-        .replace(/NSRCAP/i, '')
-        .replace(/NSRAWD/i, '')
-        .replace(/REGUPCAP/i, 'Up ')
-        .replace(/REGDOWNCAP/i, 'Down ')
-        .replace(/SYSTEMLAMBDA/i, 'Lambda');
-
-    name = name.toLowerCase().split(' ').map(word => {
-         if (['RRS', 'ECRS', 'PRC', 'ESR', 'QS', 'CLR', 'NCLR', 'PFR', 'FFR', 'GEN', 'LR'].includes(word.toUpperCase())) {
-             return word.toUpperCase();
-         }
-         return word.charAt(0).toUpperCase() + word.slice(1);
-    }).join(' ');
-
-    return name.trim();
+    let name = col.replace(/^DATA_/, '').replace(/_/g, ' ');
+    const groups = ['RESPONSIVERESERVECAPABILITYGROUP','RESPONSIVERESERVEAWARDSGROUP','ERCOTCONTINGENCYRESERVECAPABILITYGROUP','ERCOTCONTINGENCYRESERVEAWARDSGROUP','NONSPINRESERVECAPABILITYGROUP','NONSPINRESERVEAWARDSGROUP','REGULATIONSERVICECAPABILITYGROUP','REGULATIONSERVICEAWARDSGROUP','SYSTEM'];
+    groups.forEach(g => { name = name.replace(g, ''); });
+    name = name.replace(/RRCCAP/i,'').replace(/RRAWD/i,'').replace(/ECRSCAP/i,'').replace(/ECRSAWD/i,'').replace(/NSRCAP/i,'').replace(/NSRAWD/i,'').replace(/REGUPCAP/i,'Up').replace(/REGDOWNCAP/i,'Down').replace(/SYSTEMLAMBDA/i,'Lambda');
+    return name.trim().toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
   const processData = (resultObj) => {
@@ -163,8 +127,6 @@ const App = () => {
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        
-        // DEFAULT: Show Full Range (Safe Fallback)
         setDateRange({
             start: toLocalISOString(new Date(start)),
             end: toLocalISOString(new Date(last))
@@ -226,7 +188,7 @@ const App = () => {
   const currentPRC = (prcCol && rawData.length > 0) ? rawData[rawData.length - 1][prcCol] : null;
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+    <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       
       {/* HEADER */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-20 flex-shrink-0 h-16">
@@ -244,22 +206,19 @@ const App = () => {
                  {currentPRC ? currentPRC.toFixed(0) : '--'} <span className="text-sm text-slate-400 font-normal">MW</span>
               </span>
            </div>
-           <div className="h-8 w-px bg-slate-200 mx-2 hidden md:block"></div>
-           <div className="flex items-center gap-2">
-                <button onClick={fetchData} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 transition-colors" title="Reload Data">
-                    <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-                </button>
-                <label className="flex items-center gap-2 px-3 py-2 bg-slate-900 text-white rounded-md hover:bg-slate-800 cursor-pointer transition-colors text-sm font-medium shadow-sm">
-                    <Upload size={16} />
-                    <span className="hidden sm:inline">Upload CSV</span>
-                    <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
-                </label>
-           </div>
+           <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200" title="Reload Data">
+             <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+           </button>
+           <label className="flex items-center gap-2 px-3 py-2 bg-slate-900 text-white rounded-md hover:bg-slate-800 cursor-pointer transition-colors text-sm font-medium shadow-sm">
+            <Upload size={16} />
+            <span className="hidden sm:inline">Upload CSV</span>
+            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+          </label>
         </div>
       </header>
 
       {/* MAIN LAYOUT */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden relative" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         
         {/* SIDEBAR */}
         <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative z-10`}>
@@ -326,9 +285,10 @@ const App = () => {
             <Layout size={16} />
         </button>
 
-        {/* CHART AREA */}
-        <main className="flex-1 p-4 bg-slate-100 flex flex-col overflow-hidden relative">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-1 w-full h-full relative overflow-hidden flex flex-col">
+        {/* CHART AREA - FALLBACK STYLES ADDED */}
+        <main className="flex-1 p-4 bg-slate-100 flex flex-col overflow-hidden relative" style={{ flex: 1, padding: '1rem', backgroundColor: '#f1f5f9', display: 'flex', flexDirection: 'column' }}>
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-1 w-full h-full relative overflow-hidden flex flex-col" style={{ backgroundColor: 'white', borderRadius: '0.75rem', border: '1px solid #e2e8f0', width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                
                 <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-white z-10">
                     <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <Filter size={14} className="text-blue-500" />
@@ -339,15 +299,15 @@ const App = () => {
                     </div>
                 </div>
 
-                {/* CHART CONTAINER - ABSOLUTE POSITIONING TO PREVENT COLLAPSE */}
-                <div className="flex-1 w-full relative min-h-0">
+                {/* CHART CONTAINER - EXPLICIT HEIGHT CALC AS FALLBACK */}
+                <div className="flex-1 w-full relative min-h-0" style={{ flex: 1, width: '100%', position: 'relative', height: 'calc(100vh - 150px)' }}>
                     {error ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 bg-white">
                             <Activity size={48} className="mb-4 opacity-20" />
                             <p className="font-medium">{error}</p>
                         </div>
                     ) : filteredData.length > 0 ? (
-                        <div className="absolute inset-0 pb-2 pr-2 pt-4">
+                        <div className="absolute inset-0 pb-2 pr-2 pt-4" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
                             <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={filteredData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
@@ -394,7 +354,7 @@ const App = () => {
                             </ResponsiveContainer>
                         </div>
                     ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                             <EyeOff size={48} className="mb-4 opacity-20"/>
                             <p className="font-medium text-sm">No data visible in this range</p>
                             <p className="text-xs mt-1 opacity-70">Adjust the time range on the left</p>
