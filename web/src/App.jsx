@@ -2,27 +2,22 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Calendar, Filter, Layout } from 'lucide-react';
 
-// --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
 const REPO_NAME = "ERCOTASMONITOR";
 const BRANCH_NAME = "main";
 const CSV_FILENAME = "ercot_ancillary_data.csv";
-
 const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
-const COLORS = [
-  "#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", 
-  "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
-];
+const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"];
 
-// --- UTILS ---
 const toLocalISOString = (dateObj) => {
   const pad = (n) => n < 10 ? '0' + n : n;
-  return dateObj.getFullYear() +
-    '-' + pad(dateObj.getMonth() + 1) +
-    '-' + pad(dateObj.getDate()) +
-    'T' + pad(dateObj.getHours()) +
-    ':' + pad(dateObj.getMinutes());
+  return dateObj.getFullYear() + '-' + pad(dateObj.getMonth() + 1) + '-' + pad(dateObj.getDate()) + 'T' + pad(dateObj.getHours()) + ':' + pad(dateObj.getMinutes());
+};
+
+const formatTick = (timestamp) => {
+    const d = new Date(timestamp);
+    return d.getHours() === 0 ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
 const getSixHourTicks = (startTs, endTs) => {
@@ -30,10 +25,8 @@ const getSixHourTicks = (startTs, endTs) => {
     let current = new Date(startTs);
     current.setMinutes(0, 0, 0);
     const hour = current.getHours();
-    const remainder = hour % 6;
-    const add = remainder === 0 ? 0 : (6 - remainder);
+    const add = (hour % 6 === 0) ? 0 : (6 - (hour % 6));
     current.setHours(hour + add);
-
     while (current.getTime() <= endTs) {
         ticks.push(current.getTime());
         current.setHours(current.getHours() + 6);
@@ -41,22 +34,12 @@ const getSixHourTicks = (startTs, endTs) => {
     return ticks;
 };
 
-const formatTick = (timestamp) => {
-    const d = new Date(timestamp);
-    if (d.getHours() === 0) {
-        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-};
-
 const simpleCSVParse = (csvText) => {
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return { headers: [], data: [] };
-
     const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
     const parsedData = [];
-
     for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',');
         if (values.length < headers.length) continue;
@@ -82,11 +65,10 @@ const App = () => {
 
   const formatColumnName = (col) => {
     if (!col) return "";
-    let name = col.replace(/^DATA_/, '').replace(/_/g, ' ');
-    const groups = ['RESPONSIVERESERVECAPABILITYGROUP','RESPONSIVERESERVEAWARDSGROUP','ERCOTCONTINGENCYRESERVECAPABILITYGROUP','ERCOTCONTINGENCYRESERVEAWARDSGROUP','NONSPINRESERVECAPABILITYGROUP','NONSPINRESERVEAWARDSGROUP','REGULATIONSERVICECAPABILITYGROUP','REGULATIONSERVICEAWARDSGROUP','SYSTEM'];
-    groups.forEach(g => { name = name.replace(g, ''); });
-    name = name.replace(/RRCCAP/i,'').replace(/RRAWD/i,'').replace(/ECRSCAP/i,'').replace(/ECRSAWD/i,'').replace(/NSRCAP/i,'').replace(/NSRAWD/i,'').replace(/REGUPCAP/i,'Up').replace(/REGDOWNCAP/i,'Down').replace(/SYSTEMLAMBDA/i,'Lambda');
-    return name.trim().toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    let name = col.replace(/_/g, ' ');
+    // Basic cleanup of common technical prefixes
+    name = name.replace(/DATA/i, '').replace(/GROUP/i, '').replace(/AGGREGATIONS/i, 'Agg: ');
+    return name.trim();
   };
 
   const processData = (resultObj) => {
@@ -116,12 +98,13 @@ const App = () => {
     const validData = processed.filter(d => d.ts).sort((a, b) => a.ts - b.ts);
     setRawData(validData);
     
-    const metrics = headers.filter(h => h !== timestampCol);
+    const metrics = headers.filter(h => h !== timestampCol && !h.toLowerCase().includes('update'));
     setColumns(metrics);
 
     if (selectedColumns.length === 0 && metrics.length > 0) {
-        const prc = metrics.find(m => m.includes('PRC'));
-        setSelectedColumns([prc || metrics[0]]);
+        // Find something meaningful to show by default
+        const defaultMetric = metrics.find(m => m.includes('PRC') || m.includes('RRS')) || metrics[0];
+        setSelectedColumns([defaultMetric]);
     }
 
     if (validData.length > 0) {
@@ -184,13 +167,12 @@ const App = () => {
     );
   };
 
-  const prcCol = columns.find(c => c.includes('PRC'));
+  const prcCol = columns.find(c => c.includes('PRC') || c.includes('Physical'));
   const currentPRC = (prcCol && rawData.length > 0) ? rawData[rawData.length - 1][prcCol] : null;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       
-      {/* HEADER */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-20 flex-shrink-0 h-16">
         <div className="flex items-center gap-3">
           <div className="bg-slate-900 p-2 rounded-lg text-white"><Activity size={20} /></div>
@@ -203,7 +185,7 @@ const App = () => {
            <div className="hidden md:flex flex-col items-end">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">System PRC</span>
               <span className={`text-xl font-bold font-mono ${currentPRC && currentPRC < 2300 ? 'text-red-600' : 'text-emerald-600'}`}>
-                 {currentPRC ? currentPRC.toFixed(0) : '--'} <span className="text-sm text-slate-400 font-normal">MW</span>
+                 {currentPRC ? Number(currentPRC).toFixed(0) : '--'} <span className="text-sm text-slate-400 font-normal">MW</span>
               </span>
            </div>
            <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200" title="Reload Data">
@@ -217,148 +199,65 @@ const App = () => {
         </div>
       </header>
 
-      {/* MAIN LAYOUT */}
       <div className="flex flex-1 overflow-hidden relative" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         
-        {/* SIDEBAR */}
-        <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative z-10`}>
+        <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative z-10 shadow-lg`}>
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 space-y-4">
                <div className="relative">
                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
-                   <input 
-                    type="text" 
-                    placeholder="Filter metrics..." 
-                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all"
-                    value={filterText} 
-                    onChange={e => setFilterText(e.target.value)} 
-                   />
+                   <input type="text" placeholder="Filter metrics..." className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all" value={filterText} onChange={e => setFilterText(e.target.value)} />
                </div>
                <div className="space-y-2">
-                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                       <Calendar size={10} /> Time Range
-                   </label>
+                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1"><Calendar size={10} /> Time Range</label>
                    <div className="grid grid-cols-1 gap-2">
-                       <input 
-                        type="datetime-local" 
-                        className="w-full text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
-                        value={dateRange.start} 
-                        onChange={e => setDateRange({...dateRange, start: e.target.value})} 
-                       />
-                       <input 
-                        type="datetime-local" 
-                        className="w-full text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400"
-                        value={dateRange.end} 
-                        onChange={e => setDateRange({...dateRange, end: e.target.value})} 
-                       />
+                       <input type="datetime-local" className="w-full text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} />
+                       <input type="datetime-local" className="w-full text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 focus:outline-none focus:border-blue-400" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} />
                    </div>
                </div>
             </div>
             <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-slate-200">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2 mt-2">Available Metrics</div>
-                <div className="space-y-0.5">
-                    {columns
-                        .filter(c => formatColumnName(c).toLowerCase().includes(filterText.toLowerCase()))
-                        .sort((a, b) => formatColumnName(a).localeCompare(formatColumnName(b)))
-                        .map(col => (
-                        <button 
-                            key={col} 
-                            onClick={() => toggleColumn(col)}
-                            className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-center justify-between group transition-all duration-200 ${
-                                selectedColumns.includes(col) 
-                                    ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm border border-blue-100' 
-                                    : 'text-slate-600 hover:bg-slate-50 border border-transparent'
-                            }`}
-                        >
-                            <span className="truncate pr-2">{formatColumnName(col)}</span>
-                            {selectedColumns.includes(col) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />}
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2 mt-2">Available Metrics ({columns.length})</div>
+                <div className="space-y-1">
+                    {columns.filter(c => formatColumnName(c).toLowerCase().includes(filterText.toLowerCase())).sort().map(col => (
+                        <button key={col} onClick={() => toggleColumn(col)} className={`w-full text-left px-3 py-2 rounded-md text-sm flex items-start justify-between group transition-all duration-200 ${selectedColumns.includes(col) ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm border border-blue-100' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}>
+                            <span className="whitespace-normal leading-tight pr-2">{formatColumnName(col)}</span>
+                            {selectedColumns.includes(col) && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-1 flex-shrink-0" />}
                         </button>
                     ))}
                 </div>
             </div>
         </aside>
 
-        <button 
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-            className="absolute bottom-6 z-20 bg-white border border-slate-200 border-l-0 p-1.5 rounded-r-md shadow-md text-slate-500 hover:text-slate-800 transition-all" 
-            style={{left: isSidebarOpen ? '320px' : '0'}}
-        >
+        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="absolute bottom-6 z-20 bg-white border border-slate-200 border-l-0 p-1.5 rounded-r-md shadow-md text-slate-500 hover:text-slate-800 transition-all" style={{left: isSidebarOpen ? '320px' : '0'}}>
             <Layout size={16} />
         </button>
 
-        {/* CHART AREA - FALLBACK STYLES ADDED */}
         <main className="flex-1 p-4 bg-slate-100 flex flex-col overflow-hidden relative" style={{ flex: 1, padding: '1rem', backgroundColor: '#f1f5f9', display: 'flex', flexDirection: 'column' }}>
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-1 w-full h-full relative overflow-hidden flex flex-col" style={{ backgroundColor: 'white', borderRadius: '0.75rem', border: '1px solid #e2e8f0', width: '100%', height: '100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                
                 <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-white z-10">
-                    <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                        <Filter size={14} className="text-blue-500" />
-                        {selectedColumns.length > 0 ? 'Selected Metrics Trends' : 'Select metrics to view'}
-                    </h2>
-                    <div className="text-xs text-slate-400 font-mono">
-                        {filteredData.length} pts
-                    </div>
+                    <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2"><Filter size={14} className="text-blue-500" />{selectedColumns.length > 0 ? `${selectedColumns.length} Metrics Active` : 'Select metrics to view'}</h2>
+                    <div className="text-xs text-slate-400 font-mono">{filteredData.length} pts</div>
                 </div>
-
-                {/* CHART CONTAINER - EXPLICIT HEIGHT CALC AS FALLBACK */}
                 <div className="flex-1 w-full relative min-h-0" style={{ flex: 1, width: '100%', position: 'relative', height: 'calc(100vh - 150px)' }}>
                     {error ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 bg-white">
-                            <Activity size={48} className="mb-4 opacity-20" />
-                            <p className="font-medium">{error}</p>
-                        </div>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 bg-white"><Activity size={48} className="mb-4 opacity-20" /><p className="font-medium">{error}</p></div>
                     ) : filteredData.length > 0 ? (
                         <div className="absolute inset-0 pb-2 pr-2 pt-4" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
                             <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={filteredData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
-                                    <XAxis 
-                                        dataKey="ts" 
-                                        type="number" 
-                                        domain={['dataMin', 'dataMax']} 
-                                        tickFormatter={formatTick}
-                                        ticks={xAxisTicks}
-                                        stroke="#94a3b8" 
-                                        tick={{fontSize: 11, fill: '#64748b'}} 
-                                        tickMargin={10}
-                                        minTickGap={30}
-                                    />
-                                    <YAxis 
-                                        stroke="#94a3b8" 
-                                        tick={{fontSize: 11, fill: '#64748b'}} 
-                                        domain={['auto', 'auto']} 
-                                        tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val}
-                                    />
-                                    <Tooltip 
-                                        contentStyle={{borderRadius:'8px', border:'1px solid #e2e8f0', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                        labelFormatter={(label) => new Date(label).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
-                                        formatter={(value, name) => [value, formatColumnName(name)]} 
-                                    />
-                                    <Legend 
-                                        formatter={(value) => <span className="text-xs font-medium text-slate-600 ml-1">{formatColumnName(value)}</span>} 
-                                        wrapperStyle={{paddingTop: '10px'}}
-                                    />
+                                    <XAxis dataKey="ts" type="number" domain={['dataMin', 'dataMax']} tickFormatter={formatTick} ticks={xAxisTicks} stroke="#94a3b8" tick={{fontSize: 11, fill: '#64748b'}} tickMargin={10} minTickGap={30} />
+                                    <YAxis stroke="#94a3b8" tick={{fontSize: 11, fill: '#64748b'}} domain={['auto', 'auto']} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val} />
+                                    <Tooltip contentStyle={{borderRadius:'8px', border:'1px solid #e2e8f0', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)', maxWidth: '400px'}} labelFormatter={(label) => new Date(label).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})} formatter={(value, name) => [value, formatColumnName(name)]} />
+                                    <Legend formatter={(value) => <span className="text-xs font-medium text-slate-600 ml-1">{formatColumnName(value)}</span>} wrapperStyle={{paddingTop: '10px'}} />
                                     {selectedColumns.map((col, idx) => (
-                                        <Line 
-                                            key={col} 
-                                            type="monotone" 
-                                            dataKey={col} 
-                                            name={col} 
-                                            stroke={COLORS[idx % COLORS.length]} 
-                                            strokeWidth={2} 
-                                            dot={false} 
-                                            activeDot={{ r: 5, strokeWidth: 0 }} 
-                                            isAnimationActive={false} 
-                                        />
+                                        <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 0 }} isAnimationActive={false} />
                                     ))}
                                 </LineChart>
                             </ResponsiveContainer>
                         </div>
                     ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                            <EyeOff size={48} className="mb-4 opacity-20"/>
-                            <p className="font-medium text-sm">No data visible in this range</p>
-                            <p className="text-xs mt-1 opacity-70">Adjust the time range on the left</p>
-                        </div>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}><EyeOff size={48} className="mb-4 opacity-20"/><p className="font-medium text-sm">No data visible in this range</p></div>
                     )}
                 </div>
             </div>
