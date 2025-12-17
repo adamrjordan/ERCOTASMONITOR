@@ -16,7 +16,7 @@ const COLORS = [
 ];
 
 // --- HELPER: Local Time Formatter ---
-// Ensures the date picker matches the CSV timestamp exactly, ignoring UTC shifts
+// Keeps the date input synced with the raw timestamp string from the CSV
 const toLocalISOString = (dateObj) => {
   const pad = (n) => n < 10 ? '0' + n : n;
   return dateObj.getFullYear() +
@@ -140,10 +140,10 @@ const App = () => {
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        // Zoom last 12 hours
+        
+        // Default Zoom: Last 12 hours (Local Time String)
         const zoom = Math.max(start, last - (12 * 60 * 60 * 1000));
         
-        // FIXED: Use local time string, not UTC toISOString()
         setDateRange({
             start: toLocalISOString(new Date(zoom)),
             end: toLocalISOString(new Date(last))
@@ -185,6 +185,7 @@ const App = () => {
 
   const filteredData = useMemo(() => {
     if (!dateRange.start || !dateRange.end || rawData.length === 0) return rawData;
+    // Convert input strings (Local) back to timestamps
     const start = new Date(dateRange.start).getTime();
     const end = new Date(dateRange.end).getTime();
     return rawData.filter(d => d.ts >= start && d.ts <= end);
