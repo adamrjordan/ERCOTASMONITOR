@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Zap } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Zap, Bug } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -15,19 +15,9 @@ const COLORS = [
   "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
 ];
 
-// --- HELPER: Local Time Formatter ---
-// Keeps the date input synced with the raw timestamp string from the CSV
-const toLocalISOString = (dateObj) => {
-  const pad = (n) => n < 10 ? '0' + n : n;
-  return dateObj.getFullYear() +
-    '-' + pad(dateObj.getMonth() + 1) +
-    '-' + pad(dateObj.getDate()) +
-    'T' + pad(dateObj.getHours()) +
-    ':' + pad(dateObj.getMinutes());
-};
-
 // --- PARSER ---
 const simpleCSVParse = (csvText) => {
+    // Strip BOM
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return { headers: [], data: [] };
@@ -41,6 +31,7 @@ const simpleCSVParse = (csvText) => {
         const row = {};
         headers.forEach((header, index) => {
             const val = values[index]?.trim();
+            // Remove quotes if present
             row[header] = val ? val.replace(/['"]+/g, '') : val; 
         });
         parsedData.push(row);
@@ -57,64 +48,40 @@ const App = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showDebug, setShowDebug] = useState(false); // New Debug Toggle
 
-  // --- COLUMN NAME FORMATTER ---
+  // --- FORMATTER ---
   const formatColumnName = (col) => {
     if (!col) return "";
-    let name = col
-        .replace(/^DATA_/, '')
-        .replace(/RESPONSIVERESERVECAPABILITYGROUP_?/, 'RRS Cap ')
-        .replace(/RESPONSIVERESERVEAWARDSGROUP_?/, 'RRS Award ')
-        .replace(/ERCOTCONTINGENCYRESERVECAPABILITYGROUP_?/, 'ECRS Cap ')
-        .replace(/ERCOTCONTINGENCYRESERVEAWARDSGROUP_?/, 'ECRS Award ')
-        .replace(/NONSPINRESERVECAPABILITYGROUP_?/, 'NonSpin Cap ')
-        .replace(/NONSPINRESERVEAWARDSGROUP_?/, 'NonSpin Award ')
-        .replace(/REGULATIONSERVICECAPABILITYGROUP_?/, 'Reg Cap ')
-        .replace(/REGULATIONSERVICEAWARDSGROUP_?/, 'Reg Award ')
-        .replace(/SYSTEM_?/, 'System ')
-        .replace(/_GROUP/, '')
-        .replace(/_/g, ' ');
-
-    name = name
-        .replace(/RRCCAP/i, '')
-        .replace(/RRAWD/i, '')
-        .replace(/ECRSCAP/i, '')
-        .replace(/ECRSAWD/i, '')
-        .replace(/NSRCAP/i, '')
-        .replace(/NSRAWD/i, '')
-        .replace(/REGUPCAP/i, 'Up ')
-        .replace(/REGDOWNCAP/i, 'Down ')
-        .replace(/SYSTEMLAMBDA/i, 'Lambda');
-
-    name = name.toLowerCase().split(' ').map(word => {
-         if (['RRS', 'ECRS', 'PRC', 'ESR', 'QS', 'CLR', 'NCLR', 'PFR', 'FFR', 'GEN', 'LR'].includes(word.toUpperCase())) {
-             return word.toUpperCase();
-         }
-         return word.charAt(0).toUpperCase() + word.slice(1);
-    }).join(' ');
-
-    return name.trim();
+    let name = col.replace(/^DATA_/, '').replace(/_/g, ' ');
+    // Strip group names aggressively
+    const groups = ['RESPONSIVERESERVECAPABILITYGROUP','RESPONSIVERESERVEAWARDSGROUP','ERCOTCONTINGENCYRESERVECAPABILITYGROUP','ERCOTCONTINGENCYRESERVEAWARDSGROUP','NONSPINRESERVECAPABILITYGROUP','NONSPINRESERVEAWARDSGROUP','REGULATIONSERVICECAPABILITYGROUP','REGULATIONSERVICEAWARDSGROUP','SYSTEM'];
+    groups.forEach(g => { name = name.replace(g, ''); });
+    
+    // Clean Suffixes
+    name = name.replace(/RRCCAP/i,'').replace(/RRAWD/i,'').replace(/ECRSCAP/i,'').replace(/ECRSAWD/i,'').replace(/NSRCAP/i,'').replace(/NSRAWD/i,'').replace(/REGUPCAP/i,'Up').replace(/REGDOWNCAP/i,'Down').replace(/SYSTEMLAMBDA/i,'Lambda');
+    
+    // Title Case
+    return name.trim().toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
   const processData = (resultObj) => {
     const { headers, data: parsedData } = resultObj;
-
     if (!parsedData || parsedData.length < 1) return;
 
+    // Timestamp Detection
     const timestampCol = headers.find(h => h.toLowerCase().includes('timestamp') || h.toLowerCase().includes('date'));
     
     const processed = parsedData.map(row => {
       const newRow = { ...row };
-      // Handle timestamp
       if (timestampCol && row[timestampCol]) { 
          const d = new Date(row[timestampCol]);
          if (!isNaN(d)) {
             newRow.ts = d.getTime();
-            newRow.displayTime = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+            // Store a simple local time string for XAxis
+            newRow.displayTime = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
          }
       }
-
-      // Convert metrics to numbers
       headers.forEach(h => {
           if (h !== timestampCol) {
              const val = Number(row[h]);
@@ -127,26 +94,22 @@ const App = () => {
     const validData = processed.filter(d => d.ts).sort((a, b) => a.ts - b.ts);
     setRawData(validData);
     
-    // Filter columns (exclude timestamp)
-    const metrics = headers.filter(h => h !== timestampCol);
+    const metrics = headers.filter(h => h !== timestampCol && !h.toLowerCase().includes('update'));
     setColumns(metrics);
 
-    // Default Selection
     if (selectedColumns.length === 0 && metrics.length > 0) {
-        const prc = metrics.find(m => m.includes('PRC'));
+        // Look for System PRC or first metric
+        const prc = metrics.find(m => m.includes('DATA_SYSTEM_PRC'));
         setSelectedColumns([prc || metrics[0]]);
     }
 
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        
-        // Default Zoom: Last 12 hours (Local Time String)
-        const zoom = Math.max(start, last - (12 * 60 * 60 * 1000));
-        
+        // Default Zoom: Full Range (to ensure data is visible initially)
         setDateRange({
-            start: toLocalISOString(new Date(zoom)),
-            end: toLocalISOString(new Date(last))
+            start: new Date(start).toISOString().slice(0, 16),
+            end: new Date(last).toISOString().slice(0, 16)
         });
     }
   };
@@ -156,7 +119,7 @@ const App = () => {
     setError(null);
     try {
       const response = await fetch(`${DATA_URL}?t=${Date.now()}`);
-      if (!response.ok) throw new Error("CSV not found or access denied.");
+      if (!response.ok) throw new Error("CSV not found. Check GitHub repo.");
       const text = await response.text();
       const results = simpleCSVParse(text);
       if (results.data.length === 0) throw new Error("CSV is empty");
@@ -185,7 +148,6 @@ const App = () => {
 
   const filteredData = useMemo(() => {
     if (!dateRange.start || !dateRange.end || rawData.length === 0) return rawData;
-    // Convert input strings (Local) back to timestamps
     const start = new Date(dateRange.start).getTime();
     const end = new Date(dateRange.end).getTime();
     return rawData.filter(d => d.ts >= start && d.ts <= end);
@@ -211,16 +173,22 @@ const App = () => {
             <p className="text-xs text-slate-500">{loading ? "Syncing..." : "Live Data"}</p>
           </div>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4">
            <div className="text-right hidden sm:block">
               <span className="text-xs font-bold text-slate-400 block uppercase">System PRC</span>
               <span className={`text-xl font-bold ${currentPRC && currentPRC < 2300 ? 'text-red-600' : 'text-emerald-600'}`}>
                  {currentPRC ? currentPRC.toFixed(0) : '--'} MW
               </span>
            </div>
+           
+           <button onClick={() => setShowDebug(!showDebug)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 text-slate-500" title="Debug Info">
+             <Bug size={16} />
+           </button>
+
            <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200" title="Refresh">
              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
            </button>
+           
            <label className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 cursor-pointer transition-colors text-sm font-medium border border-blue-100">
             <Upload size={16} />
             <span className="hidden sm:inline">Upload CSV</span>
@@ -264,37 +232,53 @@ const App = () => {
             {isSidebarOpen ? <ChevronDown className="rotate-90" size={16}/> : <ChevronUp className="rotate-90" size={16}/>}
         </button>
 
-        {/* Main Chart */}
-        <main className="flex-1 p-6 bg-slate-50 flex flex-col overflow-hidden">
-            {/* FIXED: Added min-h-[500px] to ensure chart container never collapses to 0 height */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-4 w-full h-full min-h-[500px] relative">
+        {/* Main Chart Area */}
+        <main className="flex-1 p-6 bg-slate-50 flex flex-col overflow-hidden relative">
+            
+            {/* Debug Overlay */}
+            {showDebug && (
+                <div className="absolute top-4 right-4 z-50 bg-black/80 text-white p-4 rounded text-xs w-96 max-h-96 overflow-auto">
+                    <h3 className="font-bold border-b mb-2">Debug Info</h3>
+                    <p><strong>Raw Data Rows:</strong> {rawData.length}</p>
+                    <p><strong>Filtered Rows:</strong> {filteredData.length}</p>
+                    <p><strong>Columns:</strong> {columns.length}</p>
+                    <p><strong>Selected:</strong> {selectedColumns.join(', ')}</p>
+                    <p><strong>Date Range:</strong> {dateRange.start} to {dateRange.end}</p>
+                    <pre className="mt-2">{JSON.stringify(rawData[0], null, 2)}</pre>
+                </div>
+            )}
+
+            {/* Chart Container - Forces explicit height calculation */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-4 relative" style={{ height: 'calc(100vh - 120px)' }}>
                 {error ? (
                     <div className="h-full flex flex-col items-center justify-center text-red-500">
                         <Activity size={48} className="mb-4" />
                         <p>{error}</p>
                     </div>
                 ) : filteredData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={filteredData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
-                            <YAxis stroke="#94a3b8" tick={{fontSize: 12}} domain={['auto', 'auto']} />
-                            <Tooltip 
-                                contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                formatter={(value, name) => [value, formatColumnName(name)]} 
-                            />
-                            <Legend formatter={(value) => formatColumnName(value)} />
-                            <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
-                            {selectedColumns.map((col, idx) => (
-                                <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
-                            ))}
-                        </LineChart>
-                    </ResponsiveContainer>
+                    <div className="absolute inset-4"> 
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={filteredData}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
+                                <YAxis stroke="#94a3b8" tick={{fontSize: 12}} domain={['auto', 'auto']} />
+                                <Tooltip 
+                                    contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                                    formatter={(value, name) => [value, formatColumnName(name)]} 
+                                />
+                                <Legend formatter={(value) => formatColumnName(value)} />
+                                <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
+                                {selectedColumns.map((col, idx) => (
+                                    <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
+                                ))}
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
                         <EyeOff size={48} className="mb-4 opacity-50"/>
                         <p>No Data Visible</p>
-                        <p className="text-xs mt-2">Adjust Time Range or Upload CSV</p>
+                        <p className="text-xs mt-2">Check Debug Menu (Bug Icon) for details.</p>
                     </div>
                 )}
             </div>
