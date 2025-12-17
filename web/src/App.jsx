@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Zap } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Filter } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -10,20 +10,26 @@ const CSV_FILENAME = "ercot_ancillary_data.csv";
 
 const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
-// Colors for the chart lines
 const COLORS = [
   "#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", 
   "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
 ];
 
+// --- HELPER: Local Time Formatter ---
+// Keeps the date input synced with the raw timestamp string from the CSV
+const toLocalISO = (ts) => {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const pad = (num) => String(num).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 // --- PARSER ---
 const simpleCSVParse = (csvText) => {
-    // Strip Byte Order Mark (BOM)
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return { headers: [], data: [] };
 
-    // Clean headers
     const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
     const parsedData = [];
 
@@ -33,7 +39,6 @@ const simpleCSVParse = (csvText) => {
         const row = {};
         headers.forEach((header, index) => {
             const val = values[index]?.trim();
-            // Remove quotes if present
             row[header] = val ? val.replace(/['"]+/g, '') : val; 
         });
         parsedData.push(row);
@@ -51,11 +56,9 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // --- COLUMN NAME FORMATTER (The "Translator") ---
+  // --- COLUMN FORMATTER ---
   const formatColumnName = (col) => {
     if (!col) return "";
-    
-    // 1. Strip the massive prefixes
     let name = col
         .replace(/^DATA_/, '')
         .replace(/RESPONSIVERESERVECAPABILITYGROUP_?/, 'RRS Cap ')
@@ -70,8 +73,6 @@ const App = () => {
         .replace(/_GROUP/, '')
         .replace(/_/g, ' ');
 
-    // 2. Clean up specific messy suffixes (e.g., RRCCAPPFRGENESR -> PFR Gen ESR)
-    // We remove the repeated acronyms to make it shorter
     name = name
         .replace(/RRCCAP/i, '')
         .replace(/RRAWD/i, '')
@@ -83,9 +84,7 @@ const App = () => {
         .replace(/REGDOWNCAP/i, 'Down ')
         .replace(/SYSTEMLAMBDA/i, 'Lambda');
 
-    // 3. Title Case the rest
     name = name.toLowerCase().split(' ').map(word => {
-         // Keep known acronyms uppercase
          if (['RRS', 'ECRS', 'PRC', 'ESR', 'QS', 'CLR', 'NCLR', 'PFR', 'FFR', 'GEN', 'LR'].includes(word.toUpperCase())) {
              return word.toUpperCase();
          }
@@ -97,16 +96,14 @@ const App = () => {
 
   const processData = (resultObj) => {
     const { headers, data: parsedData } = resultObj;
-
     if (!parsedData || parsedData.length < 1) return;
 
-    // Detect timestamp column
     const timestampCol = headers.find(h => h.toLowerCase().includes('timestamp') || h.toLowerCase().includes('date'));
     
     const processed = parsedData.map(row => {
       const newRow = { ...row };
-      // Handle timestamp
       if (timestampCol && row[timestampCol]) { 
+         // Treat CSV string as local time to avoid UTC offsets shifting data out of view
          const d = new Date(row[timestampCol]);
          if (!isNaN(d)) {
             newRow.ts = d.getTime();
@@ -114,7 +111,6 @@ const App = () => {
          }
       }
 
-      // Convert metrics to numbers
       headers.forEach(h => {
           if (h !== timestampCol) {
              const val = Number(row[h]);
@@ -127,11 +123,9 @@ const App = () => {
     const validData = processed.filter(d => d.ts).sort((a, b) => a.ts - b.ts);
     setRawData(validData);
     
-    // Filter columns for sidebar (exclude timestamp)
     const metrics = headers.filter(h => h !== timestampCol);
     setColumns(metrics);
 
-    // Default Selection: Try to find PRC or just pick first
     if (selectedColumns.length === 0 && metrics.length > 0) {
         const prc = metrics.find(m => m.includes('PRC'));
         setSelectedColumns([prc || metrics[0]]);
@@ -140,11 +134,13 @@ const App = () => {
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        // Default Zoom: Last 6 hours
-        const zoom = Math.max(start, last - (6 * 60 * 60 * 1000));
+        
+        // Default Zoom: Last 12 hours (Local Time String)
+        const zoom = Math.max(start, last - (12 * 60 * 60 * 1000));
+        
         setDateRange({
-            start: new Date(zoom).toISOString().slice(0, 16),
-            end: new Date(last).toISOString().slice(0, 16)
+            start: toLocalISO(zoom),
+            end: toLocalISO(last)
         });
     }
   };
@@ -183,6 +179,7 @@ const App = () => {
 
   const filteredData = useMemo(() => {
     if (!dateRange.start || !dateRange.end || rawData.length === 0) return rawData;
+    // Convert input strings (Local) back to timestamps
     const start = new Date(dateRange.start).getTime();
     const end = new Date(dateRange.end).getTime();
     return rawData.filter(d => d.ts >= start && d.ts <= end);
@@ -194,13 +191,11 @@ const App = () => {
     );
   };
 
-  // Get current PRC for header
   const prcCol = columns.find(c => c.includes('PRC'));
   const currentPRC = (prcCol && rawData.length > 0) ? rawData[rawData.length - 1][prcCol] : null;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm z-10">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-lg text-white"><Activity size={24} /></div>
@@ -228,7 +223,6 @@ const App = () => {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative`}>
             <div className="p-4 border-b border-slate-100 space-y-4">
                 <div className="relative">
@@ -262,35 +256,47 @@ const App = () => {
             {isSidebarOpen ? <ChevronDown className="rotate-90" size={16}/> : <ChevronUp className="rotate-90" size={16}/>}
         </button>
 
-        {/* Main Chart */}
-        <main className="flex-1 p-6 bg-slate-50 flex flex-col">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-4">
+        <main className="flex-1 p-6 bg-slate-50 flex flex-col overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-4 h-full relative">
                 {error ? (
                     <div className="h-full flex flex-col items-center justify-center text-red-500">
                         <Activity size={48} className="mb-4" />
                         <p>{error}</p>
                     </div>
                 ) : filteredData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={filteredData}>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
-                            <YAxis stroke="#94a3b8" tick={{fontSize: 12}} />
-                            <Tooltip 
-                                contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                formatter={(value, name) => [value, formatColumnName(name)]} 
-                            />
-                            <Legend formatter={(value) => formatColumnName(value)} />
-                            <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
-                            {selectedColumns.map((col, idx) => (
-                                <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
-                            ))}
-                        </LineChart>
-                    </ResponsiveContainer>
+                    <div className="w-full h-full min-h-[400px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={filteredData}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
+                                <YAxis stroke="#94a3b8" tick={{fontSize: 12}} domain={['auto', 'auto']} />
+                                <Tooltip 
+                                    contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                                    formatter={(value, name) => [value, formatColumnName(name)]} 
+                                />
+                                <Legend formatter={(value) => formatColumnName(value)} />
+                                <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
+                                {selectedColumns.map((col, idx) => (
+                                    <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
+                                ))}
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                        <EyeOff size={48} className="mb-4 opacity-50"/>
-                        <p>No Data Found</p>
+                        {rawData.length > 0 ? (
+                            <>
+                                <Filter size={48} className="mb-4 opacity-50"/>
+                                <p className="font-bold text-slate-600">Data Exists, but is Hidden</p>
+                                <p className="text-sm mt-2">Adjust the "Time Range" in the sidebar.</p>
+                                <p className="text-xs mt-1 text-slate-400">Total Rows: {rawData.length} | Filter Range: {dateRange.start.replace('T', ' ')} to {dateRange.end.replace('T', ' ')}</p>
+                            </>
+                        ) : (
+                            <>
+                                <EyeOff size={48} className="mb-4 opacity-50"/>
+                                <p>No Data Found in CSV</p>
+                            </>
+                        )}
                     </div>
                 )}
             </div>
