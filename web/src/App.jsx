@@ -2,22 +2,27 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Calendar, Filter, Layout } from 'lucide-react';
 
+// --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
 const REPO_NAME = "ERCOTASMONITOR";
 const BRANCH_NAME = "main";
 const CSV_FILENAME = "ercot_ancillary_data.csv";
+
 const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
-const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"];
+const COLORS = [
+  "#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", 
+  "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
+];
 
+// --- UTILS ---
 const toLocalISOString = (dateObj) => {
   const pad = (n) => n < 10 ? '0' + n : n;
-  return dateObj.getFullYear() + '-' + pad(dateObj.getMonth() + 1) + '-' + pad(dateObj.getDate()) + 'T' + pad(dateObj.getHours()) + ':' + pad(dateObj.getMinutes());
-};
-
-const formatTick = (timestamp) => {
-    const d = new Date(timestamp);
-    return d.getHours() === 0 ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  return dateObj.getFullYear() +
+    '-' + pad(dateObj.getMonth() + 1) +
+    '-' + pad(dateObj.getDate()) +
+    'T' + pad(dateObj.getHours()) +
+    ':' + pad(dateObj.getMinutes());
 };
 
 const getSixHourTicks = (startTs, endTs) => {
@@ -32,6 +37,11 @@ const getSixHourTicks = (startTs, endTs) => {
         current.setHours(current.getHours() + 6);
     }
     return ticks;
+};
+
+const formatTick = (timestamp) => {
+    const d = new Date(timestamp);
+    return d.getHours() === 0 ? d.toLocaleDateString([], { month: 'short', day: 'numeric' }) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
 const simpleCSVParse = (csvText) => {
@@ -63,11 +73,37 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // --- COLUMN NAME BEAUTIFIER (Updated for new scraper format) ---
   const formatColumnName = (col) => {
     if (!col) return "";
     let name = col.replace(/_/g, ' ');
-    // Basic cleanup of common technical prefixes
-    name = name.replace(/DATA/i, '').replace(/GROUP/i, '').replace(/AGGREGATIONS/i, 'Agg: ');
+
+    // 1. Map the generic group names to readable categories
+    name = name
+        .replace(/RESPONSIVERESERVECAPABILITYGROUP/i, 'RRS Cap')
+        .replace(/RESPONSIVERESERVEAWARDSGROUP/i, 'RRS Award')
+        .replace(/ERCOTCONTINGENCYRESERVECAPABILITYGROUP/i, 'ECRS Cap')
+        .replace(/ERCOTCONTINGENCYRESERVEAWARDSGROUP/i, 'ECRS Award')
+        .replace(/NONSPINRESERVECAPABILITYGROUP/i, 'Non-Spin Cap')
+        .replace(/NONSPINRESERVEAWARDSGROUP/i, 'Non-Spin Award')
+        .replace(/REGULATIONCAPACITYGROUP/i, 'Reg Cap') // Note: Scraper might call it CAPACITY instead of SERVICE now
+        .replace(/REGULATIONAWARDSGROUP/i, 'Reg Award')
+        .replace(/SYSTEMAVAILABLECAPACITYGROUP/i, 'Sys Avail Cap') // The new "Right Side" fields!
+        .replace(/ERCOTWIDEPHYSICALRESPONSIVECAPABILITYGROUP/i, 'PRC')
+        .replace(/REALTIMEOPERATINGRESERVEDEMANDCURVECAPABILITYGROUP/i, 'RTORDC Cap');
+
+    // 2. Clean up the trailing index numbers (e.g., " 1 1")
+    // We keep the first index if it helps identify the specific metric within the group
+    name = name.replace(/\s\d+\s\d+$/, (match) => {
+        // Simple heuristic: map index to a generic label if we don't have the exact map yet
+        return ` #${match.trim().split(' ')[0]}`;
+    });
+
+    // 3. Title Case
+    if (name === name.toUpperCase()) {
+        name = name.toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+
     return name.trim();
   };
 
@@ -98,13 +134,14 @@ const App = () => {
     const validData = processed.filter(d => d.ts).sort((a, b) => a.ts - b.ts);
     setRawData(validData);
     
-    const metrics = headers.filter(h => h !== timestampCol && !h.toLowerCase().includes('update'));
+    // Filter columns (exclude timestamp)
+    const metrics = headers.filter(h => h !== timestampCol);
     setColumns(metrics);
 
+    // Default Selection: Find PRC (Phys Resp Cap)
     if (selectedColumns.length === 0 && metrics.length > 0) {
-        // Find something meaningful to show by default
-        const defaultMetric = metrics.find(m => m.includes('PRC') || m.includes('RRS')) || metrics[0];
-        setSelectedColumns([defaultMetric]);
+        const prc = metrics.find(m => m.includes('ERCOTWIDEPHYSICAL') || m.includes('PRC'));
+        setSelectedColumns([prc || metrics[0]]);
     }
 
     if (validData.length > 0) {
@@ -167,7 +204,7 @@ const App = () => {
     );
   };
 
-  const prcCol = columns.find(c => c.includes('PRC') || c.includes('Physical'));
+  const prcCol = columns.find(c => c.includes('ERCOTWIDEPHYSICAL') || c.includes('PRC'));
   const currentPRC = (prcCol && rawData.length > 0) ? rawData[rawData.length - 1][prcCol] : null;
 
   return (
