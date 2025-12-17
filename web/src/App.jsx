@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Calendar, Layout, Filter } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Calendar, Filter, Layout } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -17,37 +17,7 @@ const COLORS = [
 
 // --- UTILS ---
 
-// Helper to format ticks: Date at midnight, Time otherwise
-const formatTick = (timestamp) => {
-    const d = new Date(timestamp);
-    const h = d.getHours();
-    if (h === 0) {
-        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-};
-
-// Helper to generate 6-hour interval ticks
-const getSixHourTicks = (start, end) => {
-    const ticks = [];
-    let current = new Date(start);
-    
-    // Round up to nearest 6 hour mark
-    current.setMinutes(0, 0, 0);
-    const hour = current.getHours();
-    const remainder = hour % 6;
-    // Add hours to reach next 6h mark, unless we are exactly on one
-    const add = remainder === 0 ? 0 : (6 - remainder);
-    current.setHours(hour + add);
-
-    while (current.getTime() <= end) {
-        ticks.push(current.getTime());
-        current.setHours(current.getHours() + 6);
-    }
-    return ticks;
-};
-
-// Local Time Formatter for Inputs
+// Force Date Input to use Local Time (fixes timezone shifting bug)
 const toLocalISOString = (dateObj) => {
   const pad = (n) => n < 10 ? '0' + n : n;
   return dateObj.getFullYear() +
@@ -57,6 +27,35 @@ const toLocalISOString = (dateObj) => {
     ':' + pad(dateObj.getMinutes());
 };
 
+// Generate Tick Marks every 6 hours (00, 06, 12, 18)
+const getSixHourTicks = (startTs, endTs) => {
+    const ticks = [];
+    let current = new Date(startTs);
+    current.setMinutes(0, 0, 0);
+    
+    // Snap to next 6-hour block
+    const hour = current.getHours();
+    const remainder = hour % 6;
+    const add = remainder === 0 ? 0 : (6 - remainder);
+    current.setHours(hour + add);
+
+    while (current.getTime() <= endTs) {
+        ticks.push(current.getTime());
+        current.setHours(current.getHours() + 6);
+    }
+    return ticks;
+};
+
+// Tick Formatter: Shows "Dec 14" at midnight, "06:00" otherwise
+const formatTick = (timestamp) => {
+    const d = new Date(timestamp);
+    if (d.getHours() === 0) {
+        return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+};
+
+// --- PARSER ---
 const simpleCSVParse = (csvText) => {
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
@@ -88,7 +87,7 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // --- COLUMN NAME FORMATTER ---
+  // --- COLUMN NAME BEAUTIFIER ---
   const formatColumnName = (col) => {
     if (!col) return "";
     let name = col
@@ -138,11 +137,7 @@ const App = () => {
          const d = new Date(row[timestampCol]);
          if (!isNaN(d)) {
             newRow.ts = d.getTime();
-            // Full formatted string for tooltip
-            newRow.displayTime = d.toLocaleString([], {
-                month: 'short', day: 'numeric', 
-                hour: '2-digit', minute: '2-digit'
-            });
+            newRow.displayTime = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
          }
       }
       headers.forEach(h => {
@@ -168,11 +163,10 @@ const App = () => {
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        // Default Zoom: Last 24 hours to show the day cycles clearly
-        const zoom = Math.max(start, last - (24 * 60 * 60 * 1000));
         
+        // DEFAULT: Show Full Range (Safe Fallback)
         setDateRange({
-            start: toLocalISOString(new Date(zoom)),
+            start: toLocalISOString(new Date(start)),
             end: toLocalISOString(new Date(last))
         });
     }
@@ -217,12 +211,9 @@ const App = () => {
     return rawData.filter(d => d.ts >= start && d.ts <= end);
   }, [rawData, dateRange]);
 
-  // Generate ticks based on the filtered data range
   const xAxisTicks = useMemo(() => {
       if (filteredData.length === 0) return [];
-      const start = filteredData[0].ts;
-      const end = filteredData[filteredData.length - 1].ts;
-      return getSixHourTicks(start, end);
+      return getSixHourTicks(filteredData[0].ts, filteredData[filteredData.length - 1].ts);
   }, [filteredData]);
 
   const toggleColumn = (col) => {
@@ -237,18 +228,15 @@ const App = () => {
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
       
-      {/* --- HEADER --- */}
+      {/* HEADER */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-20 flex-shrink-0 h-16">
         <div className="flex items-center gap-3">
-          <div className="bg-slate-900 p-2 rounded-lg text-white">
-            <Activity size={20} />
-          </div>
+          <div className="bg-slate-900 p-2 rounded-lg text-white"><Activity size={20} /></div>
           <div>
             <h1 className="text-lg font-bold text-slate-800 leading-tight">ERCOT Monitor</h1>
             <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">{loading ? "SYNCING..." : "LIVE DASHBOARD"}</p>
           </div>
         </div>
-
         <div className="flex items-center gap-6">
            <div className="hidden md:flex flex-col items-end">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">System PRC</span>
@@ -256,14 +244,11 @@ const App = () => {
                  {currentPRC ? currentPRC.toFixed(0) : '--'} <span className="text-sm text-slate-400 font-normal">MW</span>
               </span>
            </div>
-           
            <div className="h-8 w-px bg-slate-200 mx-2 hidden md:block"></div>
-
            <div className="flex items-center gap-2">
-                <button onClick={fetchData} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 hover:text-slate-900 transition-colors" title="Reload Data">
+                <button onClick={fetchData} className="p-2 bg-white border border-slate-200 text-slate-600 rounded-md hover:bg-slate-50 transition-colors" title="Reload Data">
                     <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
                 </button>
-                
                 <label className="flex items-center gap-2 px-3 py-2 bg-slate-900 text-white rounded-md hover:bg-slate-800 cursor-pointer transition-colors text-sm font-medium shadow-sm">
                     <Upload size={16} />
                     <span className="hidden sm:inline">Upload CSV</span>
@@ -273,16 +258,12 @@ const App = () => {
         </div>
       </header>
 
-      {/* --- MAIN LAYOUT --- */}
+      {/* MAIN LAYOUT */}
       <div className="flex flex-1 overflow-hidden relative">
         
-        {/* --- SIDEBAR --- */}
+        {/* SIDEBAR */}
         <aside className={`${isSidebarOpen ? 'w-80' : 'w-0'} bg-white border-r border-slate-200 flex flex-col transition-all duration-300 relative z-10`}>
-            
-            {/* Filter Section */}
             <div className="p-4 border-b border-slate-100 bg-slate-50/50 space-y-4">
-               
-               {/* Search */}
                <div className="relative">
                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
                    <input 
@@ -293,14 +274,10 @@ const App = () => {
                     onChange={e => setFilterText(e.target.value)} 
                    />
                </div>
-
-               {/* Date Range */}
                <div className="space-y-2">
-                   <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                            <Calendar size={10} /> Time Range
-                        </label>
-                   </div>
+                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                       <Calendar size={10} /> Time Range
+                   </label>
                    <div className="grid grid-cols-1 gap-2">
                        <input 
                         type="datetime-local" 
@@ -317,8 +294,6 @@ const App = () => {
                    </div>
                </div>
             </div>
-
-            {/* Column List */}
             <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-slate-200">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 mb-2 mt-2">Available Metrics</div>
                 <div className="space-y-0.5">
@@ -343,7 +318,6 @@ const App = () => {
             </div>
         </aside>
 
-        {/* Sidebar Toggle */}
         <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
             className="absolute bottom-6 z-20 bg-white border border-slate-200 border-l-0 p-1.5 rounded-r-md shadow-md text-slate-500 hover:text-slate-800 transition-all" 
@@ -352,11 +326,9 @@ const App = () => {
             <Layout size={16} />
         </button>
 
-        {/* --- CHART AREA --- */}
+        {/* CHART AREA */}
         <main className="flex-1 p-4 bg-slate-100 flex flex-col overflow-hidden relative">
-            
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-1 w-full h-full relative overflow-hidden flex flex-col">
-                {/* Chart Header inside card */}
                 <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-white z-10">
                     <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                         <Filter size={14} className="text-blue-500" />
@@ -367,6 +339,7 @@ const App = () => {
                     </div>
                 </div>
 
+                {/* CHART CONTAINER - ABSOLUTE POSITIONING TO PREVENT COLLAPSE */}
                 <div className="flex-1 w-full relative min-h-0">
                     {error ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 bg-white">
@@ -378,8 +351,6 @@ const App = () => {
                             <ResponsiveContainer width="100%" height="100%">
                                 <LineChart data={filteredData} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
-                                    
-                                    {/* Customized X Axis with 6h Ticks */}
                                     <XAxis 
                                         dataKey="ts" 
                                         type="number" 
@@ -391,25 +362,21 @@ const App = () => {
                                         tickMargin={10}
                                         minTickGap={30}
                                     />
-                                    
                                     <YAxis 
                                         stroke="#94a3b8" 
                                         tick={{fontSize: 11, fill: '#64748b'}} 
                                         domain={['auto', 'auto']} 
                                         tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(1)}k` : val}
                                     />
-                                    
                                     <Tooltip 
                                         contentStyle={{borderRadius:'8px', border:'1px solid #e2e8f0', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
                                         labelFormatter={(label) => new Date(label).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}
                                         formatter={(value, name) => [value, formatColumnName(name)]} 
                                     />
-                                    
                                     <Legend 
                                         formatter={(value) => <span className="text-xs font-medium text-slate-600 ml-1">{formatColumnName(value)}</span>} 
                                         wrapperStyle={{paddingTop: '10px'}}
                                     />
-                                    
                                     {selectedColumns.map((col, idx) => (
                                         <Line 
                                             key={col} 
