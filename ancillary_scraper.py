@@ -8,20 +8,6 @@ import re
 URL = "https://www.ercot.com/api/1/services/read/dashboards/ancillary-service-capacity-monitor"
 DATA_FILE = "ercot_ancillary_data.csv"
 
-# Mapping ERCOT's long internal names to Short, Readable Prefixes
-GROUP_MAPPING = {
-    "responsiveReserveCapabilityGroup": "RRS_CAP",
-    "responsiveReserveAwardsGroup": "RRS_AWARD",
-    "ercotContingencyReserveCapabilityGroup": "ECRS_CAP",
-    "ercotContingencyReserveAwardsGroup": "ECRS_AWARD",
-    "nonSpinReserveCapabilityGroup": "NONSPIN_CAP",
-    "nonSpinReserveAwardsGroup": "NONSPIN_AWARD",
-    "regulationServiceCapabilityGroup": "REG_CAP",
-    "regulationServiceAwardsGroup": "REG_AWARD",
-    "system": "SYS",
-    "prcMetrics": "PRC"
-}
-
 def fetch_data():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -34,59 +20,62 @@ def fetch_data():
         print(f"Error fetching data: {e}")
         return None
 
-def process_metrics(data_block):
+def deep_flatten(obj, prefix=''):
     """
-    Extracts only numeric metrics from known groups and renames them.
+    Recursively find ALL numbers in the JSON, no matter how deep.
+    This ensures we catch the 'left side', 'right side', and any hidden tables.
     """
+    items = {}
+    
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            # Skip metadata keys
+            if k.lower() in ['dictionary', 'color', 'style', 'order', 'timestamp']: 
+                continue
+                
+            new_prefix = f"{prefix}_{k}" if prefix else k
+            items.update(deep_flatten(v, new_prefix))
+            
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            # Try to find a name/label for this list item to use as a prefix
+            # This is common in ERCOT data (e.g. {name: 'RRS', data: ...})
+            item_name = str(i)
+            if isinstance(v, dict):
+                item_name = v.get('name') or v.get('type') or v.get('label') or str(i)
+            
+            clean_name = str(item_name).replace(' ', '_').replace('/', '_')
+            new_prefix = f"{prefix}_{clean_name}"
+            items.update(deep_flatten(v, new_prefix))
+            
+    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        # We found a number! Save it.
+        items[prefix] = obj
+        
+    return items
+
+def process_data(json_data):
+    if not json_data: return None
+    
     flat_record = {
         'timestamp': datetime.datetime.utcnow().isoformat()
     }
     
-    # 1. Handle Top Level fields (like lastUpdate)
-    if 'lastUpdate' in data_block:
-        flat_record['ercot_last_update'] = data_block['lastUpdate']
-
-    raw_data = data_block.get('data', {})
-
-    # 2. Iterate only through the dictionary keys in the data block
-    for group_key, group_data in raw_data.items():
+    # Flatten the entire 'data' object
+    raw_data = json_data.get('data', {})
+    flattened_metrics = deep_flatten(raw_data)
+    
+    # Clean up keys (remove excessive underscores, uppercase)
+    for k, v in flattened_metrics.items():
+        clean_key = k.upper().replace('DATA_', '').replace('__', '_')
+        flat_record[clean_key] = v
         
-        # Check if this is a group we care about (in our mapping)
-        if group_key in GROUP_MAPPING:
-            prefix = GROUP_MAPPING[group_key]
-            
-            # If it's a dictionary of metrics (Standard format)
-            if isinstance(group_data, dict):
-                for metric_key, val in group_data.items():
-                    # STRICT FILTER: Only accept numbers. No strings, lists, or nulls.
-                    if isinstance(val, (int, float)) and not isinstance(val, bool):
-                        # Clean the metric name (e.g., 'rrsCapGen' -> 'GEN')
-                        # We remove the prefix repetition if present
-                        clean_metric = metric_key.upper()
-                        
-                        # Remove common redundancies to shorten headers
-                        clean_metric = re.sub(r'RRS|ECRS|NONSPIN|REG|CAP|AWARD|METRICS', '', clean_metric)
-                        
-                        header = f"{prefix}_{clean_metric}".strip('_')
-                        flat_record[header] = val
-                        
-            # If it's a list (sometimes ERCOT puts tuples like ['metric', value])
-            elif isinstance(group_data, list):
-                for item in group_data:
-                    # Look for ['metricName', 123] pattern
-                    if isinstance(item, list) and len(item) == 2 and isinstance(item[1], (int, float)):
-                        key_name = str(item[0]).upper()
-                        val = item[1]
-                         # Remove redundancies
-                        key_name = re.sub(r'RRS|ECRS|NONSPIN|REG|CAP|AWARD|METRICS', '', key_name)
-                        
-                        header = f"{prefix}_{key_name}".strip('_')
-                        flat_record[header] = val
-
     return flat_record
 
 def save_to_csv(record):
-    if not record: return
+    if not record or len(record) < 5: 
+        print("No valid metrics found.")
+        return
 
     df = pd.DataFrame([record])
     
@@ -94,28 +83,22 @@ def save_to_csv(record):
         df.to_csv(DATA_FILE, index=False)
         print(f"Created {DATA_FILE} with {len(record)} columns.")
     else:
-        # Append logic
         try:
             existing_df = pd.read_csv(DATA_FILE)
             updated_df = pd.concat([existing_df, df], ignore_index=True)
             updated_df.to_csv(DATA_FILE, index=False)
             print(f"Appended data. Total rows: {len(updated_df)}")
-        except Exception:
-            # If CSV is broken/garbage, overwrite it
-            print("Existing CSV was malformed. Overwriting.")
+        except Exception as e:
+            print(f"CSV Error: {e}. Overwriting.")
             df.to_csv(DATA_FILE, index=False)
 
 def main():
-    print("Running Clean Scraper...")
+    print("Running Deep Scraper...")
     json_data = fetch_data()
     if json_data:
-        record = process_metrics(json_data)
-        if len(record) > 5:
-            save_to_csv(record)
-            print("Success.")
-        else:
-            print("Error: No valid metrics found.")
-            exit(1)
+        record = process_data(json_data)
+        print(f"Found {len(record)} metrics.")
+        save_to_csv(record)
     else:
         exit(1)
 
