@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Zap, Bug } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Bug } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -17,7 +17,6 @@ const COLORS = [
 
 // --- PARSER ---
 const simpleCSVParse = (csvText) => {
-    // Strip BOM
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return { headers: [], data: [] };
@@ -31,7 +30,6 @@ const simpleCSVParse = (csvText) => {
         const row = {};
         headers.forEach((header, index) => {
             const val = values[index]?.trim();
-            // Remove quotes if present
             row[header] = val ? val.replace(/['"]+/g, '') : val; 
         });
         parsedData.push(row);
@@ -48,20 +46,18 @@ const App = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [showDebug, setShowDebug] = useState(false); // New Debug Toggle
+  const [showDebug, setShowDebug] = useState(false);
 
-  // --- FORMATTER ---
+  // --- COLUMN NAME FORMATTER ---
   const formatColumnName = (col) => {
     if (!col) return "";
     let name = col.replace(/^DATA_/, '').replace(/_/g, ' ');
-    // Strip group names aggressively
+    // Strip group names
     const groups = ['RESPONSIVERESERVECAPABILITYGROUP','RESPONSIVERESERVEAWARDSGROUP','ERCOTCONTINGENCYRESERVECAPABILITYGROUP','ERCOTCONTINGENCYRESERVEAWARDSGROUP','NONSPINRESERVECAPABILITYGROUP','NONSPINRESERVEAWARDSGROUP','REGULATIONSERVICECAPABILITYGROUP','REGULATIONSERVICEAWARDSGROUP','SYSTEM'];
     groups.forEach(g => { name = name.replace(g, ''); });
     
-    // Clean Suffixes
+    // Clean Suffixes & Title Case
     name = name.replace(/RRCCAP/i,'').replace(/RRAWD/i,'').replace(/ECRSCAP/i,'').replace(/ECRSAWD/i,'').replace(/NSRCAP/i,'').replace(/NSRAWD/i,'').replace(/REGUPCAP/i,'Up').replace(/REGDOWNCAP/i,'Down').replace(/SYSTEMLAMBDA/i,'Lambda');
-    
-    // Title Case
     return name.trim().toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
@@ -69,7 +65,6 @@ const App = () => {
     const { headers, data: parsedData } = resultObj;
     if (!parsedData || parsedData.length < 1) return;
 
-    // Timestamp Detection
     const timestampCol = headers.find(h => h.toLowerCase().includes('timestamp') || h.toLowerCase().includes('date'));
     
     const processed = parsedData.map(row => {
@@ -78,7 +73,6 @@ const App = () => {
          const d = new Date(row[timestampCol]);
          if (!isNaN(d)) {
             newRow.ts = d.getTime();
-            // Store a simple local time string for XAxis
             newRow.displayTime = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
          }
       }
@@ -98,7 +92,6 @@ const App = () => {
     setColumns(metrics);
 
     if (selectedColumns.length === 0 && metrics.length > 0) {
-        // Look for System PRC or first metric
         const prc = metrics.find(m => m.includes('DATA_SYSTEM_PRC'));
         setSelectedColumns([prc || metrics[0]]);
     }
@@ -106,10 +99,15 @@ const App = () => {
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        // Default Zoom: Full Range (to ensure data is visible initially)
+        // Format to Local ISO for input value
+        const toLocalISO = (ts) => {
+            const d = new Date(ts);
+            const pad = (n) => n < 10 ? '0'+n : n;
+            return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
         setDateRange({
-            start: new Date(start).toISOString().slice(0, 16),
-            end: new Date(last).toISOString().slice(0, 16)
+            start: toLocalISO(start),
+            end: toLocalISO(last)
         });
     }
   };
@@ -185,7 +183,7 @@ const App = () => {
              <Bug size={16} />
            </button>
 
-           <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200" title="Refresh">
+           <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200" title="Reload CSV">
              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
            </button>
            
@@ -233,52 +231,49 @@ const App = () => {
         </button>
 
         {/* Main Chart Area */}
-        <main className="flex-1 p-6 bg-slate-50 flex flex-col overflow-hidden relative">
+        <main className="flex-1 p-6 bg-slate-50 overflow-auto"> 
             
             {/* Debug Overlay */}
             {showDebug && (
-                <div className="absolute top-4 right-4 z-50 bg-black/80 text-white p-4 rounded text-xs w-96 max-h-96 overflow-auto">
-                    <h3 className="font-bold border-b mb-2">Debug Info</h3>
+                <div className="fixed top-20 right-4 z-50 bg-black/90 text-white p-4 rounded text-xs w-96 max-h-96 overflow-auto shadow-xl border border-gray-600">
+                    <h3 className="font-bold border-b mb-2 pb-1">Debug Info</h3>
                     <p><strong>Raw Data Rows:</strong> {rawData.length}</p>
                     <p><strong>Filtered Rows:</strong> {filteredData.length}</p>
-                    <p><strong>Columns:</strong> {columns.length}</p>
+                    <p><strong>Columns Found:</strong> {columns.length}</p>
                     <p><strong>Selected:</strong> {selectedColumns.join(', ')}</p>
-                    <p><strong>Date Range:</strong> {dateRange.start} to {dateRange.end}</p>
-                    <pre className="mt-2">{JSON.stringify(rawData[0], null, 2)}</pre>
+                    <p><strong>Range:</strong> {dateRange.start} <br/>to {dateRange.end}</p>
+                    <pre className="mt-2 bg-gray-800 p-2 rounded">{JSON.stringify(rawData[0], null, 2)}</pre>
                 </div>
             )}
 
-            {/* Chart Container - Forces explicit height calculation */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex-1 p-4 relative" style={{ height: 'calc(100vh - 120px)' }}>
+            {/* CHART CONTAINER: HARD CODED HEIGHT - NO FLEXBOX TRICKS */}
+            <div className="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-4" style={{ height: '600px' }}>
                 {error ? (
                     <div className="h-full flex flex-col items-center justify-center text-red-500">
                         <Activity size={48} className="mb-4" />
                         <p>{error}</p>
                     </div>
                 ) : filteredData.length > 0 ? (
-                    <div className="absolute inset-4"> 
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={filteredData}>
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
-                                <YAxis stroke="#94a3b8" tick={{fontSize: 12}} domain={['auto', 'auto']} />
-                                <Tooltip 
-                                    contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                                    formatter={(value, name) => [value, formatColumnName(name)]} 
-                                />
-                                <Legend formatter={(value) => formatColumnName(value)} />
-                                <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
-                                {selectedColumns.map((col, idx) => (
-                                    <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
-                                ))}
-                            </LineChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={filteredData}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                            <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
+                            <YAxis stroke="#94a3b8" tick={{fontSize: 12}} domain={['auto', 'auto']} />
+                            <Tooltip 
+                                contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                                formatter={(value, name) => [value, formatColumnName(name)]} 
+                            />
+                            <Legend formatter={(value) => formatColumnName(value)} />
+                            <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
+                            {selectedColumns.map((col, idx) => (
+                                <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
+                            ))}
+                        </LineChart>
+                    </ResponsiveContainer>
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
                         <EyeOff size={48} className="mb-4 opacity-50"/>
                         <p>No Data Visible</p>
-                        <p className="text-xs mt-2">Check Debug Menu (Bug Icon) for details.</p>
                     </div>
                 )}
             </div>
