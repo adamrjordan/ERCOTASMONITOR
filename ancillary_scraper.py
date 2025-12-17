@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 import datetime
 import os
-import re
+import pytz  # NEW: For robust timezone handling
 
 # URL for the ERCOT Ancillary Service Capacity Monitor API
 URL = "https://www.ercot.com/api/1/services/read/dashboards/ancillary-service-capacity-monitor"
@@ -21,51 +21,44 @@ def fetch_data():
         return None
 
 def deep_flatten(obj, prefix=''):
-    """
-    Recursively find ALL numbers in the JSON, no matter how deep.
-    This ensures we catch the 'left side', 'right side', and any hidden tables.
-    """
     items = {}
-    
     if isinstance(obj, dict):
         for k, v in obj.items():
-            # Skip metadata keys
             if k.lower() in ['dictionary', 'color', 'style', 'order', 'timestamp']: 
                 continue
-                
             new_prefix = f"{prefix}_{k}" if prefix else k
             items.update(deep_flatten(v, new_prefix))
-            
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
-            # Try to find a name/label for this list item to use as a prefix
-            # This is common in ERCOT data (e.g. {name: 'RRS', data: ...})
             item_name = str(i)
             if isinstance(v, dict):
                 item_name = v.get('name') or v.get('type') or v.get('label') or str(i)
             
+            # Clean up the key name to match the previous CSV format (1_1 instead of 1_1_1 if possible)
             clean_name = str(item_name).replace(' ', '_').replace('/', '_')
+            
+            # Special handling to avoid redundant nesting if the list is flat
             new_prefix = f"{prefix}_{clean_name}"
             items.update(deep_flatten(v, new_prefix))
-            
     elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
-        # We found a number! Save it.
         items[prefix] = obj
-        
     return items
 
 def process_data(json_data):
     if not json_data: return None
     
+    # NEW: Generate Timestamp in Central Prevailing Time (CPT)
+    # ERCOT is in America/Chicago timezone
+    central = pytz.timezone('America/Chicago')
+    now_central = datetime.datetime.now(central)
+    
     flat_record = {
-        'timestamp': datetime.datetime.utcnow().isoformat()
+        'timestamp': now_central.isoformat()
     }
     
-    # Flatten the entire 'data' object
     raw_data = json_data.get('data', {})
     flattened_metrics = deep_flatten(raw_data)
     
-    # Clean up keys (remove excessive underscores, uppercase)
     for k, v in flattened_metrics.items():
         clean_key = k.upper().replace('DATA_', '').replace('__', '_')
         flat_record[clean_key] = v
@@ -93,11 +86,11 @@ def save_to_csv(record):
             df.to_csv(DATA_FILE, index=False)
 
 def main():
-    print("Running Deep Scraper...")
+    print("Running CPT Scraper...")
     json_data = fetch_data()
     if json_data:
         record = process_data(json_data)
-        print(f"Found {len(record)} metrics.")
+        print(f"Timestamp: {record['timestamp']}")
         save_to_csv(record)
     else:
         exit(1)
