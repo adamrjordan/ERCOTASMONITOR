@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
-import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff } from 'lucide-react';
+import { Upload, Search, Activity, ChevronDown, ChevronUp, RefreshCw, EyeOff, Zap } from 'lucide-react';
 
 // --- CONFIGURATION ---
 const GITHUB_USERNAME = "adamrjordan"; 
@@ -10,6 +10,7 @@ const CSV_FILENAME = "ercot_ancillary_data.csv";
 
 const DATA_URL = `https://raw.githubusercontent.com/${GITHUB_USERNAME}/${REPO_NAME}/${BRANCH_NAME}/${CSV_FILENAME}`;
 
+// Colors for the chart lines
 const COLORS = [
   "#2563eb", "#dc2626", "#16a34a", "#d97706", "#9333ea", 
   "#0891b2", "#be185d", "#4d7c0f", "#b45309", "#4338ca"
@@ -17,10 +18,12 @@ const COLORS = [
 
 // --- PARSER ---
 const simpleCSVParse = (csvText) => {
+    // Strip Byte Order Mark (BOM)
     const cleanText = csvText.replace(/^\ufeff/, '');
     const lines = cleanText.trim().split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return { headers: [], data: [] };
 
+    // Clean headers
     const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
     const parsedData = [];
 
@@ -29,7 +32,9 @@ const simpleCSVParse = (csvText) => {
         if (values.length < headers.length) continue;
         const row = {};
         headers.forEach((header, index) => {
-            row[header] = values[index]?.trim();
+            const val = values[index]?.trim();
+            // Remove quotes if present
+            row[header] = val ? val.replace(/['"]+/g, '') : val; 
         });
         parsedData.push(row);
     }
@@ -46,25 +51,72 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // --- COLUMN NAME FORMATTER (The "Translator") ---
+  const formatColumnName = (col) => {
+    if (!col) return "";
+    
+    // 1. Strip the massive prefixes
+    let name = col
+        .replace(/^DATA_/, '')
+        .replace(/RESPONSIVERESERVECAPABILITYGROUP_?/, 'RRS Cap ')
+        .replace(/RESPONSIVERESERVEAWARDSGROUP_?/, 'RRS Award ')
+        .replace(/ERCOTCONTINGENCYRESERVECAPABILITYGROUP_?/, 'ECRS Cap ')
+        .replace(/ERCOTCONTINGENCYRESERVEAWARDSGROUP_?/, 'ECRS Award ')
+        .replace(/NONSPINRESERVECAPABILITYGROUP_?/, 'NonSpin Cap ')
+        .replace(/NONSPINRESERVEAWARDSGROUP_?/, 'NonSpin Award ')
+        .replace(/REGULATIONSERVICECAPABILITYGROUP_?/, 'Reg Cap ')
+        .replace(/REGULATIONSERVICEAWARDSGROUP_?/, 'Reg Award ')
+        .replace(/SYSTEM_?/, 'System ')
+        .replace(/_GROUP/, '')
+        .replace(/_/g, ' ');
+
+    // 2. Clean up specific messy suffixes (e.g., RRCCAPPFRGENESR -> PFR Gen ESR)
+    // We remove the repeated acronyms to make it shorter
+    name = name
+        .replace(/RRCCAP/i, '')
+        .replace(/RRAWD/i, '')
+        .replace(/ECRSCAP/i, '')
+        .replace(/ECRSAWD/i, '')
+        .replace(/NSRCAP/i, '')
+        .replace(/NSRAWD/i, '')
+        .replace(/REGUPCAP/i, 'Up ')
+        .replace(/REGDOWNCAP/i, 'Down ')
+        .replace(/SYSTEMLAMBDA/i, 'Lambda');
+
+    // 3. Title Case the rest
+    name = name.toLowerCase().split(' ').map(word => {
+         // Keep known acronyms uppercase
+         if (['RRS', 'ECRS', 'PRC', 'ESR', 'QS', 'CLR', 'NCLR', 'PFR', 'FFR', 'GEN', 'LR'].includes(word.toUpperCase())) {
+             return word.toUpperCase();
+         }
+         return word.charAt(0).toUpperCase() + word.slice(1);
+    }).join(' ');
+
+    return name.trim();
+  };
+
   const processData = (resultObj) => {
     const { headers, data: parsedData } = resultObj;
 
+    if (!parsedData || parsedData.length < 1) return;
+
+    // Detect timestamp column
+    const timestampCol = headers.find(h => h.toLowerCase().includes('timestamp') || h.toLowerCase().includes('date'));
+    
     const processed = parsedData.map(row => {
       const newRow = { ...row };
       // Handle timestamp
-      if (row.timestamp) { 
-         const d = new Date(row.timestamp);
-         newRow.ts = d.getTime();
-         newRow.displayTime = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-      } else if (row.scrape_timestamp_utc) {
-         const d = new Date(row.scrape_timestamp_utc);
-         newRow.ts = d.getTime();
-         newRow.displayTime = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      if (timestampCol && row[timestampCol]) { 
+         const d = new Date(row[timestampCol]);
+         if (!isNaN(d)) {
+            newRow.ts = d.getTime();
+            newRow.displayTime = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+         }
       }
 
-      // Convert all other columns to numbers
+      // Convert metrics to numbers
       headers.forEach(h => {
-          if (!h.includes('timestamp') && !h.includes('update')) {
+          if (h !== timestampCol) {
              const val = Number(row[h]);
              newRow[h] = isNaN(val) ? null : val;
           }
@@ -75,8 +127,8 @@ const App = () => {
     const validData = processed.filter(d => d.ts).sort((a, b) => a.ts - b.ts);
     setRawData(validData);
     
-    // Filter columns (exclude time/update)
-    const metrics = headers.filter(h => !h.includes('timestamp') && !h.includes('update'));
+    // Filter columns for sidebar (exclude timestamp)
+    const metrics = headers.filter(h => h !== timestampCol);
     setColumns(metrics);
 
     // Default Selection: Try to find PRC or just pick first
@@ -88,7 +140,7 @@ const App = () => {
     if (validData.length > 0) {
         const last = validData[validData.length - 1].ts;
         const start = validData[0].ts;
-        // Zoom to last 6 hours
+        // Default Zoom: Last 6 hours
         const zoom = Math.max(start, last - (6 * 60 * 60 * 1000));
         setDateRange({
             start: new Date(zoom).toISOString().slice(0, 16),
@@ -116,6 +168,18 @@ const App = () => {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const results = simpleCSVParse(e.target.result);
+        processData(results);
+      };
+      reader.readAsText(file);
+    }
+  };
 
   const filteredData = useMemo(() => {
     if (!dateRange.start || !dateRange.end || rawData.length === 0) return rawData;
@@ -148,13 +212,18 @@ const App = () => {
         <div className="flex items-center gap-6">
            <div className="text-right hidden sm:block">
               <span className="text-xs font-bold text-slate-400 block uppercase">System PRC</span>
-              <span className={`text-xl font-bold ${currentPRC < 2300 ? 'text-red-600' : 'text-emerald-600'}`}>
+              <span className={`text-xl font-bold ${currentPRC && currentPRC < 2300 ? 'text-red-600' : 'text-emerald-600'}`}>
                  {currentPRC ?? '--'} MW
               </span>
            </div>
            <button onClick={fetchData} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200">
              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
            </button>
+           <label className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 cursor-pointer transition-colors text-sm font-medium">
+            <Upload size={16} />
+            <span className="hidden sm:inline">Upload CSV</span>
+            <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+          </label>
         </div>
       </header>
 
@@ -164,7 +233,7 @@ const App = () => {
             <div className="p-4 border-b border-slate-100 space-y-4">
                 <div className="relative">
                    <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
-                   <input type="text" placeholder="Search..." className="w-full pl-9 pr-3 py-2 bg-slate-50 border rounded-md text-sm"
+                   <input type="text" placeholder="Search metrics..." className="w-full pl-9 pr-3 py-2 bg-slate-50 border rounded-md text-sm"
                     value={filterText} onChange={e => setFilterText(e.target.value)} />
                </div>
                <div className="space-y-2">
@@ -176,10 +245,13 @@ const App = () => {
                </div>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
-                {columns.filter(c => c.toLowerCase().includes(filterText.toLowerCase())).sort().map(col => (
+                {columns
+                    .filter(c => formatColumnName(c).toLowerCase().includes(filterText.toLowerCase()))
+                    .sort((a, b) => formatColumnName(a).localeCompare(formatColumnName(b)))
+                    .map(col => (
                     <button key={col} onClick={() => toggleColumn(col)}
-                        className={`w-full text-left px-3 py-2 rounded-md text-sm flex justify-between ${selectedColumns.includes(col) ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>
-                        <span className="truncate">{col.replace(/_/g, ' ')}</span>
+                        className={`w-full text-left px-3 py-2 rounded-md text-sm flex justify-between group transition-colors ${selectedColumns.includes(col) ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>
+                        <span className="truncate" title={col}>{formatColumnName(col)}</span>
                         {selectedColumns.includes(col) && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                     </button>
                 ))}
@@ -204,18 +276,21 @@ const App = () => {
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                             <XAxis dataKey="displayTime" stroke="#94a3b8" tick={{fontSize: 12}} minTickGap={50} />
                             <YAxis stroke="#94a3b8" tick={{fontSize: 12}} />
-                            <Tooltip contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}} />
-                            <Legend />
+                            <Tooltip 
+                                contentStyle={{borderRadius:'8px', border:'none', boxShadow:'0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
+                                formatter={(value, name) => [value, formatColumnName(name)]} 
+                            />
+                            <Legend formatter={(value) => formatColumnName(value)} />
                             <Brush dataKey="ts" height={30} stroke="#cbd5e1" tickFormatter={() => ''} />
                             {selectedColumns.map((col, idx) => (
-                                <Line key={col} type="monotone" dataKey={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
+                                <Line key={col} type="monotone" dataKey={col} name={col} stroke={COLORS[idx % COLORS.length]} dot={false} strokeWidth={2} isAnimationActive={false} />
                             ))}
                         </LineChart>
                     </ResponsiveContainer>
                 ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
                         <EyeOff size={48} className="mb-4 opacity-50"/>
-                        <p>No Data</p>
+                        <p>No Data Found</p>
                     </div>
                 )}
             </div>
