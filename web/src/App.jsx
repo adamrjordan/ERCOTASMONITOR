@@ -33,7 +33,7 @@ const METRIC_CONFIG = {
     "ERCOTCONTINGENCYRESERVECAPABILITYGROUP_3_1": { label: "Controllable Load Resources", group: "ECRS Capability" },
     "ERCOTCONTINGENCYRESERVECAPABILITYGROUP_4_1": { label: "Quick Start Generation Resources", group: "ECRS Capability" },
     "ERCOTCONTINGENCYRESERVECAPABILITYGROUP_5_1": { label: "Energy Storage Resources", group: "ECRS Capability" },
-    "ERCOTCONTINGENCYRESERVECAPABILITYGROUP_6_1": { label: "Capacity from Resources with a telemetered Resource Status of ONHOLD", group: "ECRS Capability" }, // Updated label based on typical data, might need verify
+    "ERCOTCONTINGENCYRESERVECAPABILITYGROUP_6_1": { label: "ECRS Manually deployed by Resources with a Resources Status of ONSC", group: "ECRS Capability" }, // Updated label based on typical data, might need verify
 
     // ECRS Awards
     "ERCOTCONTINGENCYRESERVEAWARDSGROUP_1_1": { label: "Generation Resources", group: "ECRS Awards" },
@@ -44,16 +44,16 @@ const METRIC_CONFIG = {
 
     // Non-Spin Capability
     "NONSPINRESERVECAPABILITYGROUP_1_1": { label: "On-Line Generation Resources with Energy Offer Curves", group: "Non-Spin Capability" },
-    "NONSPINRESERVECAPABILITYGROUP_2_1": { label: "Off-Line Generation Resources with Output Schedules", group: "Non-Spin Capability" },
-    "NONSPINRESERVECAPABILITYGROUP_3_1": { label: "Undeployed Controllable Load Resources", group: "Non-Spin Capability" },
-    "NONSPINRESERVECAPABILITYGROUP_4_1": { label: "Off-Line Generation Resources Excluding QSGRs", group: "Non-Spin Capability" },
+    "NONSPINRESERVECAPABILITYGROUP_2_1": { label: "Resources with Output Schedules", group: "Non-Spin Capability" },
+    "NONSPINRESERVECAPABILITYGROUP_3_1": { label: "Undeployed Load Resources", group: "Non-Spin Capability" },
+    "NONSPINRESERVECAPABILITYGROUP_4_1": { label: "Off-Line Generation Resources excluding QSGRs, and On-Line Gen Resources with power augmentation capacity", group: "Non-Spin Capability" },
     "NONSPINRESERVECAPABILITYGROUP_5_1": { label: "Energy Storage Resources", group: "Non-Spin Capability" },
 
     // Non-Spin Awards
     "NONSPINRESERVEAWARDSGROUP_1_1": { label: "On-Line Generation Resources with Energy Offer Curves", group: "Non-Spin Awards" },
     "NONSPINRESERVEAWARDSGROUP_2_1": { label: "On-Line Generation Resources with Output Schedules", group: "Non-Spin Awards" },
     "NONSPINRESERVEAWARDSGROUP_3_1": { label: "Load Resources", group: "Non-Spin Awards" },
-    "NONSPINRESERVEAWARDSGROUP_4_1": { label: "Off-Line Generation Resources Excluding QSGRs", group: "Non-Spin Awards" },
+    "NONSPINRESERVEAWARDSGROUP_4_1": { label: "Off-Line Generation Resources Excluding QSGRs, including Non-Spin awards on power augmentation capacity", group: "Non-Spin Awards" },
     "NONSPINRESERVEAWARDSGROUP_5_1": { label: "Quick Start Generation Resources", group: "Non-Spin Awards" },
     "NONSPINRESERVEAWARDSGROUP_6_1": { label: "Non-Spin awards on power augmentation capacity", group: "Non-Spin Awards" },
 
@@ -66,25 +66,25 @@ const METRIC_CONFIG = {
     "REGULATIONCAPACITYGROUP_6_1": { label: "Deployed Reg-Down", group: "Regulation Capability" },
 
     // Regulation Awards
-    "REGULATIONAWARDSGROUP_1_1": { label: "Reg-Up Awards", group: "Regulation Awards" },
-    "REGULATIONAWARDSGROUP_2_1": { label: "Reg-Down Awards", group: "Regulation Awards" },
+    "REGULATIONAWARDSGROUP_1_1": { label: "Reg-Up", group: "Regulation Awards" },
+    "REGULATIONAWARDSGROUP_2_1": { label: "Reg-Down", group: "Regulation Awards" },
 
     // System Available Capacity (HSL/LASL)
-    "SYSTEMAVAILABLECAPACITYGROUP_1_1": { label: "Aggregate telemetered HSL for On-Line Generation Resources", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_2_1": { label: "Aggregate telemetered HSL for On-Line Generation Resources with a telemetered Low Sustained Limit (LSL) equal to 0", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_3_1": { label: "Aggregate telemetered HSL for On-Line Intermittent Renewable Resources (IRRs) - Wind", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_4_1": { label: "Aggregate telemetered HSL for On-Line Intermittent Renewable Resources (IRRs) - PV", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_5_1": { label: "Aggregate telemetered HSL for On-Line Energy Storage Resources (ESRs)", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_6_1": { label: "Aggregate telemetered HSL for Off-Line Generation Resources", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_7_1": { label: "Aggregate telemetered HSL for Off-Line Quick Start Generation Resources (QSGRs)", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_8_1": { label: "Aggregate telemetered HSL for On-Line Quick Start Generation Resources (QSGRs)", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_9_1": { label: "Aggregate telemetered HSL for Combined Cycle Generation Resources", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_10_1": { label: "Aggregate telemetered HSL capacity for Resources with a telemetered Resource Status of OUT", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_11_1": { label: "Aggregate telemetered HSL for Resources with status of ONREG", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_12_1": { label: "Aggregate telemetered HSL for Resources with status of ONDSR", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_13_1": { label: "Capacity available to increase Generation Resource Base Points in the next 5 minutes in SCED (HDL)", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_14_1": { label: "Capacity available to decrease Generation Resource Base Points in the next 5 minutes in SCED (LDL)", group: "System Available Capacity" },
-    "SYSTEMAVAILABLECAPACITYGROUP_15_1": { label: "Capacity to provide Reg-Up, RRS, or both (HASL)", group: "System Available Capacity" }, // Shortened for brevity
+    "SYSTEMAVAILABLECAPACITYGROUP_1_1": { label: "Capacity from Controllable Load Resources available to DECREASE Base Points (energy consumption) in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_2_1": { label: "Capacity from Controllable Load Resources available to INCREASE Base Points (energy consumption) in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_3_1": { label: "Capacity with Energy Offer Curves available to increase Generation Resource Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_4_1": { label: "Capacity with Energy Offer Curves available to decrease Generation Resource Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_5_1": { label: "Capacity without Energy Offer Curves available to increase Generation Resource Base points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_6_1": { label: "Capacity without Energy Offer Curves available to decrease Generation Resource Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_7_1": { label: "Capacity with Energy Bid/Offer Curves available to increase ESR Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_8_1": { label: "Capacity with Energy Bid/Offer Curves available to decrease ESR Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_9_1": { label: "Capacity without Energy Bid/Offer Curves available to increase ESR Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_10_1": { label: "Capacity without Energy Bid/Offer Curves available to decrease ESR Base Points in SCED", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_11_1": { label: "Capacity available to increase Generation Resource Base Points in the next 5 minutes in SCED (HDL)", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_12_1": { label: "Capacity available to decrease Generation Resource Base Points in the next 5 minutes in SCED (LDL)", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_13_1": { label: "Capacity to provide Reg-Up, RRS, or both, irrespective of whether it is capable of providing ECRS or Non-Spin", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_14_1": { label: "Capacity to provide Reg-Up, RRS, ECRS, or any combination irrespective of whether it is capable of providing Non-Spin", group: "System Available Capacity" },
+    "SYSTEMAVAILABLECAPACITYGROUP_15_1": { label: "Capacity to provide Reg-Up, RRS, ECRS, or Non-Spin, in any combination", group: "System Available Capacity" }, 
 
     // System PRC
     "ERCOTWIDEPHYSICALRESPONSIVECAPABILITYGROUP_1_1": { label: "ERCOT-wide Physical Responsive Capability (PRC)", group: "System PRC" },
@@ -95,7 +95,8 @@ const METRIC_CONFIG = {
     
     // EMR Out
     "EMROUTANDOUTLCAPACITYGROUP_1_1": { label: "Aggregate telemetered HSL capacity for Resources with a telemetered Resource Status of EMR", group: "EMR Out and Out-L Capacity" },
-    "EMROUTANDOUTLCAPACITYGROUP_2_1": { label: "Aggregate telemetered HSL capacity for Resources with a telemetered Resource Status of OUTL", group: "EMR Out and Out-L Capacity" }
+    "EMROUTANDOUTLCAPACITYGROUP_2_1": { label: "Aggregate telemetered HSL capacity for Resources with a telemetered Resource Status of OUT", group: "EMR Out and Out-L Capacity" },
+    "EMROUTANDOUTLCAPACITYGROUP_3_1": { label: "Aggregate net telemetered consumption for Resources with a telemetered Resource Status of OUTL", group: "EMR Out and Out-L Capacity" }
 };
 
 const toLocalISOString = (dateObj) => {
